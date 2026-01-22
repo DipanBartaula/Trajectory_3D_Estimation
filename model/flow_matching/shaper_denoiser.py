@@ -276,7 +276,10 @@ class ShapeRDenoiser(nn.Module):
                 )
             else:
                 pc_features = self.point_cloud_feature_extractor(pc_cond)
-                condition_context.append(pc_features["context"].to(z_x_t_in.dtype))
+                # * naively shape is [N_coords, feat_dim], need to reshape to [B, num_points, feat_dim]
+                pc_features_context = pc_features["context"]
+                condition_context.append(pc_features_context.reshape(z_x_t.shape[0], -1, pc_features_context.shape[-1]).to(z_x_t_in.dtype))
+                # condition_context.append(pc_features["context"].to(z_x_t_in.dtype))
                 condition_context.append(
                     self.point_cond_separator.expand(
                         condition_context[-1].shape[0], -1, -1
@@ -353,6 +356,7 @@ class ShapeRDenoiser(nn.Module):
                 clip_tokens = self.simple_clip_projection(txt_in_clip)
 
         if len(condition_context) > 0:
+            # * the pc_features_context may mismatch shape
             condition_context = torch.cat(condition_context, dim=1)
         else:
             condition_context = None
