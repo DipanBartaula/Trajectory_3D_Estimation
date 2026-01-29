@@ -1,0 +1,295 @@
+import argparse
+import os
+import cv2
+import numpy as np
+import pickle
+import torch
+import shutil
+from pathlib import Path
+from tqdm import tqdm
+import io
+import pycolmap
+from PIL import Image
+
+# VLM and SAM imports
+from transformers import BlipProcessor, BlipForConditionalGeneration
+from segment_anything import sam_model_registry, SamPredictor
+
+def extract_frames(video_path, output_dir):
+    """Extract frames from video to a directory."""
+    print(f"Extracting frames from {video_path}...")
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    
+    cap = cv2.VideoCapture(video_path)
+    frame_count = 0
+    frame_paths = []
+    
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        
+        # Save frame
+        frame_path = os.path.join(output_dir, f"frame_{frame_count:05d}.jpg")
+        cv2.imwrite(frame_path, frame)
+        frame_paths.append(frame_path)
+        frame_count += 1
+    
+    cap.release()
+    print(f"Extracted {frame_count} frames.")
+    return frame_paths
+
+def run_sfm(image_dir, output_path):
+    """Run Structure from Motion using pycolmap."""
+    print("Running SfM with pycolmap...")
+    output_path = Path(output_path)
+    if not output_path.exists():
+        output_path.mkdir(parents=True)
+        
+    database_path = output_path / "database.db"
+    
+    if os.path.exists(database_path):
+        os.remove(database_path)
+        
+    # extract features
+    pycolmap.extract_features(database_path, image_dir)
+    
+    # match features
+    pycolmap.match_exhaustive(database_path)
+    
+    # map
+    maps = pycolmap.incremental_mapping(database_path, image_dir, output_path)
+    
+    if not maps:
+        raise RuntimeError("SfM failed to reconstruct any model.")
+        
+    # Return the largest reconstruction
+    return maps[0]
+
+def get_caption(image_path, model_id="Salesforce/blip-image-captioning-base"):
+    """Generate caption using a small VLM (BLIP)."""
+    print("Generating caption...")
+    processor = BlipProcessor.from_pretrained(model_id)
+    model = BlipForConditionalGeneration.from_pretrained(model_id)
+    
+    raw_image = Image.open(image_path).convert('RGB')
+    inputs = processor(raw_image, return_tensors="pt")
+    
+    out = model.generate(**inputs)
+    caption = processor.decode(out[0], skip_special_tokens=True)
+    print(f"Caption: {caption}")
+    return caption
+
+def segment_object(image_path, point_prompt=None, device="cuda"):
+    """Segment object using SAM."""
+    # Use vit_b (base) as it's smaller than hue/large
+    sam_checkpoint = "sam_vit_b_01ec64.pth" 
+    # Note: User must have the checkpoint. If not present, we might warn or fail.
+    # Assuming the user has it or we download it. 
+    # For this script, we'll assume the model is loadable via registry if weights are present.
+    # If weights are missing, this will fail. We'll try to use a default or assume user provides path.
+    
+    # For now, let's assume the user has set up SAM or just use the registry logic
+    
+    # Check if checkpoint exists, if not, maybe download? 
+    # To keep it simple, we assume standard usage.
+    
+    pass # Implemented in the main loop to avoid reloading model
+
+
+def process_video(video_path, output_pkl, sam_checkpoint="sam_vit_b_01ec64.pth", device="cuda"):
+    """
+    Process a video file to create a ShapeR-compatible pickle file.
+    """
+    # Temp directories
+    temp_dir = Path("temp_processing")
+    frames_dir = temp_dir / "frames"
+    sfm_dir = temp_dir / "sfm"
+    
+    if temp_dir.exists():
+        shutil.rmtree(temp_dir)
+    
+    # 1. Extract Frames
+    frame_paths = extract_frames(video_path, frames_dir)
+    if not frame_paths:
+        print("No frames extracted.")
+        return
+
+    # 2. Run SfM
+    try:
+        reconstruction = run_sfm(frames_dir, sfm_dir)
+    except RuntimeError as e:
+        print(f"SfM failed: {e}")
+        return
+    
+    # Extract data from reconstruction
+    points3D = []
+    for p_id, p in reconstruction.points3D.items():
+        points3D.append(p.xyz)
+    points3D = np.array(points3D)
+    
+    if len(points3D) == 0:
+        print("No 3D points found.")
+        return
+
+    # Center and scale points
+    center = np.mean(points3D, axis=0)
+    points3D_centered = points3D - center
+    scale = np.max(np.abs(points3D_centered))
+    
+    # 3. Captioning
+    # Use the middle frame for captioning
+    mid_frame_idx = len(frame_paths) // 2
+    caption = get_caption(frame_paths[mid_frame_idx])
+    
+    # 4. Prepare data needed for Pickle
+    rec_images = reconstruction.images
+    
+    # Lists to store result
+    pkl_image_data = []
+    pkl_Ts_camera_model = []
+    pkl_object_point_projections = []
+    pkl_camera_params = []
+    pkl_visible_points_model = [] 
+    
+    point3d_id_to_idx = {p_id: i for i, p_id in enumerate(reconstruction.points3D.keys())}
+    points_model_array = np.array([reconstruction.points3D[p_id].xyz for p_id in reconstruction.points3D.keys()])
+    
+    # SAM Model Load
+    print("Loading SAM...")
+    sam = sam_model_registry["vit_b"](checkpoint=sam_checkpoint)
+    sam.to(device=device)
+    predictor = SamPredictor(sam)
+    
+    sorted_image_ids = sorted(rec_images.keys())
+    
+    print("Processing frames and segmenting...")
+    for img_id in tqdm(sorted_image_ids):
+        im_obj = rec_images[img_id]
+        name = im_obj.name
+        frame_path = frames_dir / name
+        
+        # 1. Read Image Data
+        with open(frame_path, "rb") as f:
+            img_bytes = f.read()
+        pkl_image_data.append(img_bytes)
+        
+        # 2. Camera Params (Intrinsics)
+        cam = reconstruction.cameras[im_obj.camera_id]
+        K = np.eye(3)
+        if cam.model_name == "SIMPLE_PINHOLE":
+            f_val, cx, cy = cam.params
+            K[0,0] = f_val
+            K[1,1] = f_val
+            K[0,2] = cx
+            K[1,2] = cy
+        elif cam.model_name == "PINHOLE":
+            fx, fy, cx, cy = cam.params
+            K[0,0] = fx
+            K[1,1] = fy
+            K[0,2] = cx
+            K[1,2] = cy
+        elif cam.model_name == "RADIAL":
+             f_val, cx, cy, k1, k2 = cam.params
+             K[0,0] = f_val
+             K[1,1] = f_val
+             K[0,2] = cx
+             K[1,2] = cy
+        
+        pkl_camera_params.append(torch.tensor(K, dtype=torch.float32))
+        
+        # 3. Extrinsics (World to Camera)
+        R = im_obj.rotmat()
+        t = im_obj.tvec
+        T_cw = np.eye(4)
+        T_cw[:3, :3] = R
+        T_cw[:3, 3] = t
+        pkl_Ts_camera_model.append(torch.tensor(T_cw, dtype=torch.float32))
+        
+        # 4. Projections & Visibility
+        p2ds = im_obj.points2D 
+        
+        valid_3d_indices = []
+        valid_uvs = []
+        
+        for p2d in p2ds:
+            if p2d.has_point3D():
+                pid = p2d.point3D_id
+                if pid in point3d_id_to_idx:
+                    idx = point3d_id_to_idx[pid]
+                    valid_3d_indices.append(idx)
+                    valid_uvs.append(p2d.xy)
+                    
+        pkl_visible_points_model.append(np.array(valid_3d_indices))
+        pkl_object_point_projections.append(torch.tensor(np.array(valid_uvs), dtype=torch.float32))
+        
+        # 5. Segmentation & Filtering
+        img_cv2 = cv2.imread(str(frame_path))
+        img_rgb = cv2.cvtColor(img_cv2, cv2.COLOR_BGR2RGB)
+        predictor.set_image(img_rgb)
+        
+        if len(valid_uvs) > 0:
+            uvs = np.array(valid_uvs)
+            u_min, v_min = np.min(uvs, axis=0)
+            u_max, v_max = np.max(uvs, axis=0)
+            box = np.array([u_min, v_min, u_max, v_max])
+            
+            masks, _, _ = predictor.predict(
+                point_coords=None,
+                point_labels=None,
+                box=box[None, :],
+                multimask_output=False,
+            )
+            mask = masks[0] 
+            
+            # Refine visibility
+            kept_indices = []
+            kept_uvs = []
+            
+            for i, uv in enumerate(valid_uvs):
+                u, v = int(uv[0]), int(uv[1])
+                if 0 <= v < mask.shape[0] and 0 <= u < mask.shape[1]:
+                    if mask[v, u]:
+                        kept_indices.append(valid_3d_indices[i])
+                        kept_uvs.append(uv)
+            
+            pkl_visible_points_model[-1] = np.array(kept_indices)
+            pkl_object_point_projections[-1] = torch.tensor(np.array(kept_uvs), dtype=torch.float32)
+            
+    # Construct final Pickle Dict
+    data = {
+        "points_model": torch.tensor(points_model_array, dtype=torch.float32),
+        "bounds": torch.tensor(scale, dtype=torch.float32),
+        "inv_dist_std": torch.zeros(len(points_model_array), dtype=torch.float32),
+        "dist_std": torch.zeros(len(points_model_array), dtype=torch.float32),
+        "image_data": pkl_image_data,
+        "Ts_camera_model": pkl_Ts_camera_model,
+        "object_point_projections": pkl_object_point_projections,
+        "camera_params": pkl_camera_params,
+        "caption": caption,
+        "category": "object",
+        "T_model_world": torch.eye(4, dtype=torch.float32),
+        "T_zup_obj": torch.eye(4, dtype=torch.float32),
+        "visible_points_model": pkl_visible_points_model
+    }
+    
+    print(f"Saving to {output_pkl}...")
+    with open(output_pkl, "wb") as f:
+        pickle.dump(data, f)
+    
+    print("Video processing done!")
+
+def main():
+    parser = argparse.ArgumentParser(description="Convert Video to Input PKL for ShapeR")
+    parser.add_argument("--video_path", type=str, required=True, help="Path to input .mp4 video")
+    parser.add_argument("--output_pkl", type=str, required=True, help="Path to output .pkl file")
+    parser.add_argument("--sam_checkpoint", type=str, default="sam_vit_b_01ec64.pth", help="Path to SAM checkpoint")
+    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+    
+    args = parser.parse_args()
+    process_video(args.video_path, args.output_pkl, args.sam_checkpoint, args.device)
+
+
+if __name__ == "__main__":
+    main()

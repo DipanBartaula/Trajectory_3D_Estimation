@@ -36,6 +36,11 @@ from postprocessing.helper import (
 )
 from tqdm import tqdm
 
+import sys
+# Add current directory to path to support importing video_to_pkl
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from video_to_pkl import process_video
+
 # @lint-ignore-every PYTHONPICKLEISBAD
 
 # Preset configs: (num_images, token_multiplier, num_denoising_steps)
@@ -53,10 +58,16 @@ def main():
     # parse arguments
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        "--video_path",
+        type=str,
+        default=None,
+        help="Path to the input video file. If provided, input_pkl will be generated from this video.",
+    )
+    parser.add_argument(
         "--input_pkl",
         type=str,
-        default="ADT1292__stool.pkl",
-        help="Path to the input pkl file which contains the processed observations for the detected bbox.",
+        default=None,
+        help="Path to the input pkl file. If video_path is provided, this is ignored (or used as output path for generated pkl).",
     )
     parser.add_argument(
         "--remove_floating_geometry",
@@ -93,12 +104,45 @@ def main():
 
     args = parser.parse_args()
 
+    # Handle video input
+    if args.video_path:
+        if not os.path.exists(args.video_path):
+            raise FileNotFoundError(f"Video file not found: {args.video_path}")
+        
+        if args.input_pkl is None:
+            # Generate a default pkl name based on video name
+            video_name = Path(args.video_path).stem
+            args.input_pkl = f"{video_name}.pkl"
+        
+        print(f"Processing video {args.video_path} -> {args.input_pkl}")
+        
+        # Determine device
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        
+        # Check for SAM checkpoint in current dir, or assume it's there
+        sam_ckpt = "sam_vit_b_01ec64.pth"
+        if not os.path.exists(sam_ckpt):
+            # Try to grab it if possible or warn. process_video might fail if not found.
+            pass
+            
+        process_video(args.video_path, args.input_pkl, sam_checkpoint=sam_ckpt, device=device)
+    
+    if not args.input_pkl:
+        # Fallback default if nothing provided (though arguments usually handle defaults, we changed default to None)
+        args.input_pkl = "ADT1292__stool.pkl"
+        print(f"No input provided, using default: {args.input_pkl}")
+
     num_images, token_multiplier, num_steps = preset_configs[args.config]
 
     # example override of weights stored in /home/yawarnihal/shaper_weights
     # todo: once the checkpoints are on huggingface, adjust this
     setup_checkpoints()
-    setup_data(args.input_pkl)
+    
+    # Only setup data if it's the default demo file or we need to download it.
+    # If we generated it from video, we don't need to download it.
+    if args.input_pkl == "ADT1292__stool.pkl" and not os.path.exists(args.input_pkl):
+        setup_data(args.input_pkl)
+
 
     output_dir = Path(args.output_dir)
     if not output_dir.exists():
