@@ -131,6 +131,30 @@ class ShapeRDenoiser(nn.Module):
             )
         self.null_context = torch.nn.Parameter(self.null_context.to(torch.bfloat16))
 
+    def convert_to_fp16(self):
+        self.transformer = self.transformer.to(torch.float16)
+        self.simple_latent_projection = self.simple_latent_projection.to(torch.float16)
+        # keep the point cloud feature extractor in float32
+        self.point_cloud_feature_extractor = self.point_cloud_feature_extractor.to(
+            torch.float32
+        )
+        if "image" in self.input_types:
+            self.dino_ray_extractor = self.dino_ray_extractor.to(torch.float16)
+            self.image_cond_separator = torch.nn.Parameter(
+                self.image_cond_separator.to(torch.float16)
+            )
+        if "point" in self.input_types:
+            self.point_cond_separator = torch.nn.Parameter(
+                self.point_cond_separator.to(torch.float16)
+            )
+        if "text" in self.input_types:
+            self.simple_t5_projection = self.simple_t5_projection.to(torch.float16)
+            self.simple_clip_projection = self.simple_clip_projection.to(torch.float16)
+            self.text_cond_separator = torch.nn.Parameter(
+                self.text_cond_separator.to(torch.float16)
+            )
+        self.null_context = torch.nn.Parameter(self.null_context.to(torch.float16))
+
     # @property
     # def dtype(self):
     #     next(self.parameters()).dtype

@@ -159,7 +159,7 @@ def main():
     # load the model and weights
     print("Loading model...")
     model = ShapeRDenoiser(config).to(device)
-    model.convert_to_bfloat16()
+    model.convert_to_fp16()
     model.load_state_dict(state_dict, strict=False)
 
     vae = MichelangeloLikeAutoencoderWrapper(
@@ -167,7 +167,7 @@ def main():
     )
 
     text_feature_extractor = TextFeatureExtractor(device=device)
-    text_feature_extractor = text_feature_extractor.to(torch.bfloat16)
+    text_feature_extractor = text_feature_extractor.to(torch.float16)
 
     model = torch.compile(model, fullgraph=True)
     model = model.eval()
@@ -210,7 +210,7 @@ def main():
     with torch.no_grad():
         for batch in tqdm(inference_loader):
             batch = InferenceDataset.move_batch_to_device(
-                batch, device, dtype=torch.bfloat16
+                batch, device, dtype=torch.float16
             )
             latents_pred = model.infer_latents(
                 batch,
