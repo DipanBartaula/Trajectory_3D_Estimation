@@ -8,9 +8,16 @@
 
 # pyre-unsafe
 
+import os
+from pathlib import Path
+
 import torch
 from torch import nn, Tensor
 from transformers import CLIPTextModel, CLIPTokenizer, T5EncoderModel, T5Tokenizer
+
+# Set cache directory to checkpoints/huggingface in project root
+CACHE_DIR = Path(__file__).parent.parent.parent / "checkpoints" / "huggingface"
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class HFEmbedder(nn.Module):
@@ -22,21 +29,21 @@ class HFEmbedder(nn.Module):
 
         if self.is_clip:
             self.tokenizer: CLIPTokenizer = CLIPTokenizer.from_pretrained(
-                version, max_length=max_length
+                version, max_length=max_length, cache_dir=str(CACHE_DIR)
             )
             # pyre-fixme[8]: Attribute has type `CLIPTextModel`; used as
             #  `PreTrainedModel`.
             self.hf_module: CLIPTextModel = CLIPTextModel.from_pretrained(
-                version, **hf_kwargs
+                version, cache_dir=str(CACHE_DIR), **hf_kwargs
             )
         else:
             self.tokenizer: T5Tokenizer = T5Tokenizer.from_pretrained(
-                version, max_length=max_length
+                version, max_length=max_length, cache_dir=str(CACHE_DIR)
             )
             # pyre-fixme[8]: Attribute has type `T5EncoderModel`; used as
             #  `PreTrainedModel`.
             self.hf_module: T5EncoderModel = T5EncoderModel.from_pretrained(
-                version, **hf_kwargs
+                version, cache_dir=str(CACHE_DIR), **hf_kwargs
             )
 
         # pyre-fixme[16]: Item `CLIPTextModel` of `CLIPTextModel | T5EncoderModel`
@@ -72,6 +79,7 @@ def load_t5(device, max_length=256):
         is_clip=False,
         max_length=max_length,
         torch_dtype=torch.bfloat16,
+        tie_word_embeddings=False,
     ).to(device)
 
 

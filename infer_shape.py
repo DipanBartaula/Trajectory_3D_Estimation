@@ -186,9 +186,17 @@ def main():
 
     # create batch sample
     print("Loading input pkl from", args.input_pkl)
+    
+    # Check if the path exists directly, otherwise try data/ folder
+    pkl_path = args.input_pkl
+    if not os.path.exists(pkl_path):
+        possible_path = os.path.join("data", args.input_pkl)
+        if os.path.exists(possible_path):
+            pkl_path = possible_path
+            
     inference_dataset = InferenceDataset(
         config,
-        paths=[os.path.join("data", args.input_pkl)],
+        paths=[pkl_path],
         override_num_views=num_images,
     )
     inference_loader = torch.utils.data.DataLoader(

@@ -6,6 +6,9 @@
 VIDEO_PATH=$1
 DEVICE=${2:-cuda}  # Default to cuda if not specified
 
+# Optional: Set Hugging Face Cache Directory
+# export HF_HOME="/mnt/Enterprise3/dipan/hf_cache"
+
 if [ -z "$VIDEO_PATH" ]; then
   echo "Error: No video path provided."
   echo "Usage: ./run_inference.sh <path_to_video.mp4> [device]"

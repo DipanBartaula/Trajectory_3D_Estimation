@@ -15,6 +15,10 @@ from PIL import Image
 from transformers import BlipProcessor, BlipForConditionalGeneration
 from segment_anything import sam_model_registry, SamPredictor
 
+# Set cache directory to checkpoints/huggingface in project root
+CACHE_DIR = Path(__file__).parent / "checkpoints" / "huggingface"
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
 def extract_frames(video_path, output_dir):
     """Extract frames from video to a directory."""
     print(f"Extracting frames from {video_path}...")
@@ -70,8 +74,8 @@ def run_sfm(image_dir, output_path):
 def get_caption(image_path, model_id="Salesforce/blip-image-captioning-base"):
     """Generate caption using a small VLM (BLIP)."""
     print("Generating caption...")
-    processor = BlipProcessor.from_pretrained(model_id)
-    model = BlipForConditionalGeneration.from_pretrained(model_id)
+    processor = BlipProcessor.from_pretrained(model_id, cache_dir=str(CACHE_DIR))
+    model = BlipForConditionalGeneration.from_pretrained(model_id, cache_dir=str(CACHE_DIR))
     
     raw_image = Image.open(image_path).convert('RGB')
     inputs = processor(raw_image, return_tensors="pt")
