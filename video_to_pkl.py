@@ -19,14 +19,25 @@ from segment_anything import sam_model_registry, SamPredictor
 CACHE_DIR = Path(__file__).parent / "checkpoints" / "huggingface"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-def extract_frames(video_path, output_dir):
-    """Extract frames from video to a directory."""
-    print(f"Extracting frames from {video_path}...")
+def extract_frames(video_path, output_dir, target_fps=2):
+    """Extract frames from video to a directory at a specific FPS."""
+    print(f"Extracting frames from {video_path} at {target_fps} fps...")
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
     cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        print(f"Error: Could not open video {video_path}")
+        return []
+        
+    video_fps = cap.get(cv2.CAP_PROP_FPS)
+    if video_fps == 0 or np.isnan(video_fps):
+        video_fps = 30.0 # Fallback
+    
+    skip_interval = max(1, int(round(video_fps / target_fps)))
+    
     frame_count = 0
+    saved_count = 0
     frame_paths = []
     
     while True:
@@ -34,16 +45,18 @@ def extract_frames(video_path, output_dir):
         if not ret:
             break
         
-        # Save frame
-        frame_path = os.path.join(output_dir, f"frame_{frame_count:05d}.jpg")
-        cv2.imwrite(frame_path, frame)
-        frame_paths.append(frame_path)
+        # Save frame only if it matches interval
+        if frame_count % skip_interval == 0:
+            frame_path = os.path.join(output_dir, f"frame_{saved_count:05d}.jpg")
+            cv2.imwrite(frame_path, frame)
+            frame_paths.append(frame_path)
+            saved_count += 1
+            
         frame_count += 1
     
     cap.release()
-    cap.release()
-    print(f"Extracted {frame_count} frames.")
-    if frame_count > 0:
+    print(f"Extracted {saved_count} frames (from {frame_count} total).")
+    if saved_count > 0:
         first_frame = cv2.imread(frame_paths[0])
         print(f"Frame resolution: {first_frame.shape}")
     return frame_paths
@@ -61,11 +74,27 @@ def run_sfm(image_dir, output_path):
         os.remove(database_path)
         
     # extract features
-    pycolmap.extract_features(database_path, image_dir)
+    sift_opt = pycolmap.SiftExtractionOptions()
+    sift_opt.use_gpu = True
+    try:
+        print("Attempting SfM Feature Extraction on GPU...")
+        pycolmap.extract_features(database_path, image_dir, sift_options=sift_opt)
+    except Exception as e:
+        print(f"GPU Extraction failed ({e}). Falling back to CPU.")
+        sift_opt.use_gpu = False
+        pycolmap.extract_features(database_path, image_dir, sift_options=sift_opt)
     
     # match features
     print("Matching features...")
-    pycolmap.match_exhaustive(database_path)
+    match_opt = pycolmap.SiftMatchingOptions()
+    match_opt.use_gpu = True
+    try:
+        print("Attempting SfM Matching on GPU...")
+        pycolmap.match_exhaustive(database_path, matching_options=match_opt)
+    except Exception as e:
+        print(f"GPU Matching failed ({e}). Falling back to CPU.")
+        match_opt.use_gpu = False
+        pycolmap.match_exhaustive(database_path, matching_options=match_opt)
     
     # map
     print("Running incremental mapping...")
