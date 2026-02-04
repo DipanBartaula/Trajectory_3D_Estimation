@@ -122,12 +122,26 @@ def main():
         device = "cuda" if torch.cuda.is_available() else "cpu"
         
         # Check for SAM checkpoint
-        sam_ckpt = "checkpoints/sam_vit_b_01ec64.pth"
+        sam_ckpt_dir = "checkpoints"
+        if not os.path.exists(sam_ckpt_dir):
+            os.makedirs(sam_ckpt_dir, exist_ok=True)
+            
+        sam_ckpt = os.path.join(sam_ckpt_dir, "sam_vit_b_01ec64.pth")
+        
         if not os.path.exists(sam_ckpt):
+            # Check root fallback
             if os.path.exists("sam_vit_b_01ec64.pth"):
                 sam_ckpt = "sam_vit_b_01ec64.pth"
             else:
-                sam_ckpt = None # Let process_video handle search/download logic
+                # Download it!
+                print(f"SAM checkpoint not found. Downloading to {sam_ckpt}...")
+                sam_url = "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth"
+                try:
+                    torch.hub.download_url_to_file(sam_url, sam_ckpt)
+                    print("Download complete.")
+                except Exception as e:
+                    print(f"Failed to download SAM checkpoint: {e}")
+                    sam_ckpt = None # Logic downstream needs to handle this or crash
             
         process_video(args.video_path, args.input_pkl, sam_checkpoint=sam_ckpt, device=device)
     
