@@ -74,34 +74,12 @@ def run_sfm(image_dir, output_path):
         os.remove(database_path)
         
     # extract features
-    sift_opt = pycolmap.SiftExtractionOptions()
-    if hasattr(sift_opt, 'use_gpu'):
-        sift_opt.use_gpu = True
-        
-    try:
-        print("Attempting SfM Feature Extraction...")
-        pycolmap.extract_features(database_path, image_dir, sift_options=sift_opt)
-    except Exception as e:
-        print(f"Extraction failed ({e}). Retrying with default options.")
-        # Fallback to fresh options (defaults)
-        sift_opt = pycolmap.SiftExtractionOptions()
-        if hasattr(sift_opt, 'use_gpu'): sift_opt.use_gpu = False
-        pycolmap.extract_features(database_path, image_dir, sift_options=sift_opt)
+    print("Extracting features...")
+    pycolmap.extract_features(database_path, image_dir)
     
     # match features
     print("Matching features...")
-    match_opt = pycolmap.SiftMatchingOptions()
-    if hasattr(match_opt, 'use_gpu'):
-        match_opt.use_gpu = True
-        
-    try:
-        print("Attempting SfM Matching...")
-        pycolmap.match_exhaustive(database_path, matching_options=match_opt)
-    except Exception as e:
-        print(f"Matching failed ({e}). Retrying with default options.")
-        match_opt = pycolmap.SiftMatchingOptions()
-        if hasattr(match_opt, 'use_gpu'): match_opt.use_gpu = False
-        pycolmap.match_exhaustive(database_path, matching_options=match_opt)
+    pycolmap.match_exhaustive(database_path)
     
     # map
     print("Running incremental mapping...")
