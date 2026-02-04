@@ -19,7 +19,7 @@ from segment_anything import sam_model_registry, SamPredictor
 CACHE_DIR = Path(__file__).parent / "checkpoints" / "huggingface"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-def extract_frames(video_path, output_dir, target_fps=7):
+def extract_frames(video_path, output_dir, target_fps=2):
     """Extract frames from video to a directory at a specific FPS."""
     print(f"Extracting frames from {video_path} at {target_fps} fps...")
     if not os.path.exists(output_dir):
