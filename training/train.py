@@ -6,13 +6,16 @@ import torch.nn.functional as F
 import torch.optim as optim
 from tqdm import tqdm
 from omegaconf import OmegaConf
+from accelerate import Accelerator
+from accelerate.utils import ProjectConfiguration
 
 # Add parent directory
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from training.model import get_model, get_vae, get_text_encoder
 from training.dataloader import get_dataloader
-from training.utils import setup_wandb, log_metrics, save_checkpoint
+from training.utils import log_metrics, save_checkpoint # save_checkpoint might be retired for accelerator.save_state
+from training.config import login_services
 from dataset.shaper_dataset import InferenceDataset
 
 def flow_matching_loss(model, x_1, batch, device):
@@ -21,11 +24,11 @@ def flow_matching_loss(model, x_1, batch, device):
     """
     B, L, D = x_1.shape
     
-    # x_0 is Gaussian noise (in FP16)
-    x_0 = torch.randn_like(x_1).to(device)
+    # x_0 is Gaussian noise
+    x_0 = torch.randn_like(x_1) # device handled by accelerator if x_1 on device
     
     # Sample t
-    t = torch.rand(B).to(device).to(x_1.dtype)
+    t = torch.rand(B, device=device).to(x_1.dtype)
     
     # Reshape t
     t_expanded = t.view(B, 1, 1).expand(B, L, D)
@@ -40,79 +43,118 @@ def flow_matching_loss(model, x_1, batch, device):
     loss = F.mse_loss(v_pred, v_target)
     return loss
 
-def train_one_epoch(model, dataloader, optimizer, device, epoch, step_offset, dtype=torch.float16):
+def train_one_epoch(model, dataloader, optimizer, accelerator, epoch, step_offset):
     model.train()
     total_loss = 0
     steps = step_offset
     
-    pbar = tqdm(dataloader, desc=f"Epoch {epoch}")
+    # Disable tqdm on non-main processes to reduce log noise
+    pbar = tqdm(dataloader, desc=f"Epoch {epoch}", disable=not accelerator.is_local_main_process)
+    
     for batch in pbar:
-        # Move batch to device with correct dtype (FP16)
-        batch = InferenceDataset.move_batch_to_device(batch, device, dtype=dtype)
+        # Move complex types (SparseTensor) manually if Accelerator misses them
+        # Accelerator handles standard Tensors in dicts usually
+        batch = InferenceDataset.move_batch_to_device(batch, accelerator.device)
         
-        # Placeholder for GT latents (x_1)
-        # Assuming we generate random target if not present, to allow code to run
+        # Placeholder for GT latents
         if "gt_latents" in batch:
              x_1 = batch["gt_latents"]
         else:
-             # Dummy target in FP16
-             x_1 = torch.randn(batch["images"].shape[0], 256, 128, device=device, dtype=dtype)
+             # Dummy target
+             x_1 = torch.randn(batch["images"].shape[0], 256, 128, device=accelerator.device, dtype=torch.float32)
 
+        # Optimization Step
+        # No zero_grad needed if set_to_none=True in init (default)
         optimizer.zero_grad()
-        loss = flow_matching_loss(model, x_1, batch, device)
-        loss.backward()
+        
+        loss = flow_matching_loss(model, x_1, batch, accelerator.device)
+        
+        accelerator.backward(loss)
         optimizer.step()
         
         total_loss += loss.item()
         steps += 1
         
-        log_metrics({"train/loss": loss.item(), "epoch": epoch}, steps)
-        pbar.set_postfix(loss=loss.item())
+        # Logging
+        if accelerator.is_main_process:
+             accelerator.log({"train/loss": loss.item(), "epoch": epoch, "step": steps}, step=steps)
+             pbar.set_postfix(loss=loss.item())
         
+        # Save Checkpoint
         if steps % 250 == 0:
-            save_checkpoint(model, optimizer, steps, "training/checkpoints")
+            accelerator.wait_for_everyone()
+            if accelerator.is_main_process:
+                save_path = os.path.join("training/checkpoints", f"checkpoint_{steps}")
+                accelerator.save_state(save_path)
             
     return steps
 
 def main():
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    login_services()
+    
+    # Initialize Accelerator
+    project_config = ProjectConfiguration(project_dir=".", logging_dir="logs")
+    accelerator = Accelerator(
+        mixed_precision="fp16",
+        log_with="wandb",
+        project_config=project_config
+    )
+    
+    if accelerator.is_main_process:
+        print("Initializing Training with Accelerator...")
+    
+    # Configuration
     config_path = "checkpoints/config.yaml"
     ckpt_path = "checkpoints/019-0-bfloat16.ckpt"
     
-    print("Initializing Training (FP16)...")
-    model, config = get_model(config_path, ckpt_path, device, apply_lora=True, precision="fp16")
+    # Load Model (Base in FP16/BF16, LoRA in FP32 usually)
+    # We pass precision="fp16" to convert Base model.
+    model, config = get_model(config_path, ckpt_path, accelerator.device, apply_lora=True, precision="fp16")
     
+    # Data
     dataloader = get_dataloader(config, "data", batch_size=2)
-    if not dataloader:
-        print("No data found, exiting.")
-        return
+    if not dataloader: 
+        if accelerator.is_main_process: print("No data found."); return
 
+    # Optimizer (Only trainable params)
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     optimizer = optim.AdamW(trainable_params, lr=1e-4)
+
+    # Prepare with Accelerator
+    # Note: model, optimizer, dataloader are prepared.
+    model, optimizer, dataloader = accelerator.prepare(model, optimizer, dataloader)
     
-    setup_wandb("shaper-lora-training", "run-001", OmegaConf.to_container(config))
-    
-    global_step = 0
-    start_epoch = 0
-    
+    # Init Logging
+    if accelerator.is_main_process:
+        accelerator.init_trackers(
+            project_name="shaper-lora-training", 
+            config=OmegaConf.to_container(config),
+            init_kwargs={"wandb": {"name": "accelerate-run"}}
+        )
+
     # Resume Logic
     checkpoint_dir = "training/checkpoints"
-    os.makedirs(checkpoint_dir, exist_ok=True)
-    checkpoints = [f for f in os.listdir(checkpoint_dir) if f.endswith(".pth")]
-    if checkpoints:
-        checkpoints.sort(key=lambda x: os.path.getmtime(os.path.join(checkpoint_dir, x)))
-        latest_ckpt = os.path.join(checkpoint_dir, checkpoints[-1])
-        print(f"Resuming from {latest_ckpt}")
-        
-        ckpt_data = torch.load(latest_ckpt, map_location=device)
-        model.load_state_dict(ckpt_data['model_state_dict'], strict=False)
-        optimizer.load_state_dict(ckpt_data['optimizer_state_dict'])
-        global_step = ckpt_data.get('step', 0)
-        print(f"Resumed at step {global_step}")
-    
+    global_step = 0
+    start_epoch = 0
+    # Search for accelerator checkpoints (directories) like checkpoint_1000
+    # Logic: Look for folders starting with checkpoint_
+    if os.path.exists(checkpoint_dir):
+        subdirs = [d for d in os.listdir(checkpoint_dir) if d.startswith("checkpoint_")]
+        if subdirs:
+            # Sort by integer step
+            subdirs.sort(key=lambda x: int(x.split('_')[1]))
+            latest_ckpt = os.path.join(checkpoint_dir, subdirs[-1])
+            if accelerator.is_main_process: print(f"Resuming from {latest_ckpt}")
+            accelerator.load_state(latest_ckpt)
+            try:
+                global_step = int(subdirs[-1].split('_')[1])
+            except: pass
+
     epochs = 100
     for epoch in range(start_epoch, epochs):
-        global_step = train_one_epoch(model, dataloader, optimizer, device, epoch, global_step, dtype=torch.float16)
+        global_step = train_one_epoch(model, dataloader, optimizer, accelerator, epoch, global_step)
+        
+    accelerator.end_training()
 
 if __name__ == "__main__":
     main()

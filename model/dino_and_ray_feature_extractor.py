@@ -55,7 +55,11 @@ class DinoAndRayFeatureExtractor(torch.nn.Module):
 
     def __post_init__(self):
         super().__init__()
-        torch.hub.set_dir("/tmp/dinov2")
+        # Set cache to project checkpoints dir
+        from pathlib import Path
+        ckpt_dir = Path(__file__).parent.parent / "checkpoints" / "dinov2"
+        ckpt_dir.mkdir(parents=True, exist_ok=True)
+        torch.hub.set_dir(str(ckpt_dir))
         if self.use_giant_model:
             backbone_model = dinov2_vitl14_reg(pretrained=True)
             self.post_inject_mask_dim = 256

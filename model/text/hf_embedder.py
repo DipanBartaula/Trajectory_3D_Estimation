@@ -34,7 +34,7 @@ class HFEmbedder(nn.Module):
             # pyre-fixme[8]: Attribute has type `CLIPTextModel`; used as
             #  `PreTrainedModel`.
             self.hf_module: CLIPTextModel = CLIPTextModel.from_pretrained(
-                version, cache_dir=str(CACHE_DIR), **hf_kwargs
+                version, cache_dir=str(CACHE_DIR), use_safetensors=True, **hf_kwargs
             )
         else:
             self.tokenizer: T5Tokenizer = T5Tokenizer.from_pretrained(
@@ -43,7 +43,7 @@ class HFEmbedder(nn.Module):
             # pyre-fixme[8]: Attribute has type `T5EncoderModel`; used as
             #  `PreTrainedModel`.
             self.hf_module: T5EncoderModel = T5EncoderModel.from_pretrained(
-                version, cache_dir=str(CACHE_DIR), **hf_kwargs
+                version, cache_dir=str(CACHE_DIR), use_safetensors=True, **hf_kwargs
             )
 
         # pyre-fixme[16]: Item `CLIPTextModel` of `CLIPTextModel | T5EncoderModel`

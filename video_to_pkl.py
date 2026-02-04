@@ -116,10 +116,26 @@ def segment_object(image_path, point_prompt=None, device="cuda"):
     pass # Implemented in the main loop to avoid reloading model
 
 
-def process_video(video_path, output_pkl, sam_checkpoint="sam_vit_b_01ec64.pth", device="cuda"):
+def process_video(video_path, output_pkl, sam_checkpoint=None, device="cuda"):
     """
     Process a video file to create a ShapeR-compatible pickle file.
     """
+    # Locate SAM Checkpoint
+    if sam_checkpoint is None:
+        # Check standard locations
+        possible_paths = [
+            "sam_vit_b_01ec64.pth",
+            "checkpoints/sam_vit_b_01ec64.pth",
+            "../sam_vit_b_01ec64.pth"
+        ]
+        for p in possible_paths:
+            if os.path.exists(p):
+                sam_checkpoint = p
+                break
+        if sam_checkpoint is None:
+             # Default fallback (might fail if not present)
+             sam_checkpoint = "checkpoints/sam_vit_b_01ec64.pth"
+             print(f"Warning: SAM checkpoint not explicitly found, trying {sam_checkpoint}")
     # Temp directories
     temp_dir = Path("temp_processing")
     frames_dir = temp_dir / "frames"
