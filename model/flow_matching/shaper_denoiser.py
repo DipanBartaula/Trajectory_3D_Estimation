@@ -271,6 +271,119 @@ class ShapeRDenoiser(nn.Module):
             return output, intermediate
         return output
 
+    @torch.no_grad()
+    def get_condition_embeddings(self, batch, dtype, skipped_condition=None):
+        """
+        Pre-compute conditioning embeddings (Context, Text Tokens, CLIP/Vector).
+        """
+        # Determine Batch Size from semi_dense_points or images
+        # But we don't have z_x_t here, so we assume batch size matches batch inputs
+        B = 1
+        if "images" in batch:
+            B = batch["images"].shape[0]
+        elif "semi_dense_points" in batch:
+            B = len(batch["semi_dense_points"]) # SparseTensor doesn't have simple shape[0] usually?
+            # actually semi_dense_points is usually a list of sparse tensors or a collated batch locally
+            # In inference, batch size is 1 usually.
+            
+        condition_context = []
+        clip_tokens = None
+        txt_tokens = None
+
+        if "point" in self.input_types:
+            if skipped_condition is not None and "point" in skipped_condition:
+                point_tokens = self.null_context.expand(B, -1, -1)
+                condition_context.append(point_tokens)
+                condition_context.append(
+                    self.point_cond_separator.expand(B, -1, -1)
+                )
+            else:
+                pc_cond = batch["semi_dense_points"]
+                pc_features = self.point_cloud_feature_extractor(pc_cond)
+                pc_features_context = pc_features["context"]
+                # Reshape logic mirrors forward_impl
+                # Assuming batch dim is 0 or handled by reshape
+                if pc_features_context.shape[0] != B:
+                     # Attempt to infer B if it was collated
+                     pass
+                
+                condition_context.append(pc_features_context.reshape(B, -1, pc_features_context.shape[-1]).to(dtype))
+                condition_context.append(
+                    self.point_cond_separator.expand(
+                        condition_context[-1].shape[0], -1, -1
+                    )
+                )
+
+        if "image" in self.input_types:
+            if skipped_condition is not None and "image" in skipped_condition:
+                img_tokens = self.null_context.expand(B, -1, -1)
+                condition_context.append(img_tokens)
+                condition_context.append(
+                    self.image_cond_separator.expand(B, -1, -1)
+                )
+            else:
+                img_in = batch["images"]
+                msk_in = batch["masks_ingest"]
+                box_in = batch["boxes_ingest"]
+                cam_ext = batch["camera_extrinsics"]
+                cam_int = batch["camera_intrinsics"]
+                
+                B_img, V, C, H, W = img_in.shape
+                # img_in logic
+                img_in = img_in.reshape(B_img * V, C, H, W)
+                msk_in = msk_in.reshape(B_img * V, 1, H, W)
+                box_in = box_in.reshape(B_img * V, 2, 2)
+                camera_extrinsics = cam_ext.reshape(B_img * V, 4, 4)
+                camera_intrinsics = cam_int.reshape(B_img * V, 4, 4)
+                
+                dino_feats = self.dino_ray_extractor(
+                    img_in,
+                    camera_extrinsics,
+                    camera_intrinsics,
+                    msk_in,
+                    box_in,
+                )
+                img_tokens = self.dino_ray_extractor.get_token_feature(dino_feats)
+                # Training selection logic omitted for inference
+                img_tokens = img_tokens.reshape(B_img, -1, img_tokens.shape[-1])
+                condition_context.append(img_tokens)
+                condition_context.append(
+                    self.image_cond_separator.expand(
+                        condition_context[-1].shape[0], -1, -1
+                    )
+                )
+
+        if "text" in self.input_types:
+            txt_in_t5 = batch["t5_text"]
+            txt_in_clip = batch["clip_text"]
+            
+            if skipped_condition is not None and "text" in skipped_condition:
+                txt_tokens = self.null_context.expand(B, -1, -1)
+                condition_context.append(txt_tokens)
+                condition_context.append(
+                    self.text_cond_separator.expand(B, -1, -1)
+                )
+            else:
+                txt_tokens = self.simple_t5_projection(txt_in_t5)
+                if not self.use_pre_text_attn_blocks:
+                    condition_context.append(txt_tokens)
+                else:
+                    condition_context.append(
+                        self.null_context.expand(B, -1, -1)
+                    )
+                condition_context.append(
+                    self.text_cond_separator.expand(
+                        condition_context[-1].shape[0], -1, -1
+                    )
+                )
+                clip_tokens = self.simple_clip_projection(txt_in_clip)
+
+        full_context = None
+        if len(condition_context) > 0:
+            full_context = torch.cat(condition_context, dim=1)
+            
+        return full_context, txt_tokens, clip_tokens
+
     def forward_impl(
         self,
         z_x_t,
@@ -285,108 +398,45 @@ class ShapeRDenoiser(nn.Module):
         t,
         skipped_condition,
         return_intermediate=False,
+        precomputed_embeddings=None # New Argument
     ):
         z_x_t_in = self.simple_latent_projection(z_x_t)
 
-        condition_context = []
-        clip_tokens = None
-        if "point" in self.input_types:
-            # if True:
-            if skipped_condition is not None and "point" in skipped_condition:
-                point_tokens = self.null_context.expand(z_x_t_in.shape[0], -1, -1)
-                condition_context.append(point_tokens)
-                condition_context.append(
-                    self.point_cond_separator.expand(z_x_t_in.shape[0], -1, -1)
-                )
-            else:
-                pc_features = self.point_cloud_feature_extractor(pc_cond)
-                # * naively shape is [N_coords, feat_dim], need to reshape to [B, num_points, feat_dim]
-                pc_features_context = pc_features["context"]
-                condition_context.append(pc_features_context.reshape(z_x_t.shape[0], -1, pc_features_context.shape[-1]).to(z_x_t_in.dtype))
-                # condition_context.append(pc_features["context"].to(z_x_t_in.dtype))
-                condition_context.append(
-                    self.point_cond_separator.expand(
-                        condition_context[-1].shape[0], -1, -1
-                    )
-                )
-
-        if "image" in self.input_types:
-            # if True:
-            if skipped_condition is not None and "image" in skipped_condition:
-                img_tokens = self.null_context.expand(z_x_t_in.shape[0], -1, -1)
-                condition_context.append(img_tokens)
-                condition_context.append(
-                    self.image_cond_separator.expand(z_x_t_in.shape[0], -1, -1)
-                )
-            else:
-                B, V, C, H, W = img_in.shape
-                sequence_idx = torch.arange(B).to(img_in.device)
-                sequence_idx = sequence_idx.unsqueeze(1).repeat(1, V).reshape(-1)
-                img_in = img_in.reshape(B * V, C, H, W)
-                msk_in = msk_in.reshape(B * V, 1, H, W)
-                box_in = box_in.reshape(B * V, 2, 2)
-                camera_extrinsics = cam_ext.reshape(B * V, 4, 4)
-                camera_intrinsics = cam_int.reshape(B * V, 4, 4)
-                dino_feats = self.dino_ray_extractor(
-                    img_in,
-                    camera_extrinsics,
-                    camera_intrinsics,
-                    msk_in,
-                    box_in,
-                )
-                img_tokens = self.dino_ray_extractor.get_token_feature(dino_feats)
-                if self.training and self.variable_num_views:
-                    img_tokens = img_tokens.reshape(
-                        B, V, img_tokens.shape[1], img_tokens.shape[2]
-                    )
-                    selected_img_tokens = []
-                    for v_idx in range(V):
-                        v_toks = sorted(
-                            random.sample(list(range(img_tokens.shape[2])), 1024 // V)
-                        )
-                        selected_img_tokens.append(
-                            img_tokens[:, v_idx : v_idx + 1, v_toks, :]
-                        )
-                    img_tokens = torch.cat(selected_img_tokens, dim=1)
-                img_tokens = img_tokens.reshape(B, -1, img_tokens.shape[-1])
-                condition_context.append(img_tokens)
-                condition_context.append(
-                    self.image_cond_separator.expand(
-                        condition_context[-1].shape[0], -1, -1
-                    )
-                )
-
-        txt_tokens = None
-        if "text" in self.input_types:
-            if skipped_condition is not None and "text" in skipped_condition:
-                txt_tokens = self.null_context.expand(z_x_t_in.shape[0], -1, -1)
-                condition_context.append(txt_tokens)
-                condition_context.append(
-                    self.text_cond_separator.expand(z_x_t_in.shape[0], -1, -1)
-                )
-            else:
-                txt_tokens = self.simple_t5_projection(txt_in_t5)
-                if not self.use_pre_text_attn_blocks:
-                    condition_context.append(txt_tokens)
-                else:
-                    condition_context.append(
-                        self.null_context.expand(z_x_t_in.shape[0], -1, -1)
-                    )
-                condition_context.append(
-                    self.text_cond_separator.expand(
-                        condition_context[-1].shape[0], -1, -1
-                    )
-                )
-                clip_tokens = self.simple_clip_projection(txt_in_clip)
-
-        if len(condition_context) > 0:
-            # * the pc_features_context may mismatch shape
-            condition_context = torch.cat(condition_context, dim=1)
+        if precomputed_embeddings is not None:
+            condition_context, txt_tokens, clip_tokens = precomputed_embeddings
+            # Ensure context batch size matches z_x_t (broadcasting might be needed if B=1 and z_x_t has B>1?)
+            if condition_context is not None and condition_context.shape[0] != z_x_t.shape[0]:
+                 condition_context = condition_context.expand(z_x_t.shape[0], -1, -1)
+            if txt_tokens is not None and txt_tokens.shape[0] != z_x_t.shape[0]:
+                 txt_tokens = txt_tokens.expand(z_x_t.shape[0], -1, -1)
+            if clip_tokens is not None and clip_tokens.shape[0] != z_x_t.shape[0]:
+                 clip_tokens = clip_tokens.expand(z_x_t.shape[0], -1, -1)
+                 
+            y = clip_tokens
         else:
-            condition_context = None
+             # Original logic (copy-pasted or call get_condition_embeddings?)
+             # calling get_condition_embeddings would be cleaner but requires restructuring batch args
+             # For now, to minimize diff risk, I will rely on the existing logic
+             # But wait, I'm replacing the whole method in modify_file.
+             # I should use get_condition_embeddings here to avoid duplication!
+             
+             # Reconstruct 'batch' dict to reuse get_condition_embeddings
+             batch_proxy = {}
+             if "point" in self.input_types: batch_proxy["semi_dense_points"] = pc_cond
+             if "image" in self.input_types: 
+                 batch_proxy["images"] = img_in
+                 batch_proxy["masks_ingest"] = msk_in
+                 batch_proxy["boxes_ingest"] = box_in
+                 batch_proxy["camera_extrinsics"] = cam_ext
+                 batch_proxy["camera_intrinsics"] = cam_int
+             if "text" in self.input_types:
+                 batch_proxy["t5_text"] = txt_in_t5
+                 batch_proxy["clip_text"] = txt_in_clip
+                 
+             condition_context, txt_tokens, y = self.get_condition_embeddings(batch_proxy, z_x_t_in.dtype, skipped_condition)
 
         output = self.transformer(
-            z_x_t_in, condition_context, t, y=clip_tokens, txt_tokens=txt_tokens
+            z_x_t_in, condition_context, t, y=y, txt_tokens=txt_tokens
         )
         output, intermediate = output
         if return_intermediate:
@@ -424,6 +474,7 @@ class ShapeRDenoiser(nn.Module):
         num_steps=10,
         cfg_value=-1,
         use_shifted_sampling=False,
+        precomputed_embeddings=None,
     ):
         """
         Generate latent codes from conditioning inputs using ODE solver.
@@ -457,6 +508,7 @@ class ShapeRDenoiser(nn.Module):
                 text_feature_extractor,
                 force_fixed_num_images,
                 cfg_value=cfg_value,
+                precomputed_embeddings=precomputed_embeddings
             )
         )
         x_init = self.get_x0_from_input(batch, token_shape=token_shape)
@@ -504,6 +556,7 @@ class WrappedModel(ModelWrapper):
         text_feature_extractor=dummy_text_extractor,
         force_fixed_num_images=None,
         cfg_value=-1,
+        precomputed_embeddings=None
     ):
         super().__init__(model)
         self.model = model
@@ -523,9 +576,16 @@ class WrappedModel(ModelWrapper):
             self.batch["camera_intrinsics"] = self.batch["camera_intrinsics"][
                 :, :force_fixed_num_images
             ]
-        self.batch["t5_text"], self.batch["clip_text"] = text_feature_extractor(
-            batch["caption"]
-        )
+        
+        self.precomputed_embeddings = precomputed_embeddings
+        if self.precomputed_embeddings is None:
+             self.batch["t5_text"], self.batch["clip_text"] = text_feature_extractor(
+                 batch["caption"]
+             )
+        else:
+             # If precomputed, we don't need raw text features maybe?
+             # But batch is kept for safety
+             pass
         self.cfg_value = cfg_value
         if cfg_value != -1:
             self.forward = self.forward_CFG
@@ -538,7 +598,7 @@ class WrappedModel(ModelWrapper):
             pc_cond.feats, pc_cond.coords, pc_cond.stride
         )
         t = t[None].expand(x.shape[0])
-        return self.model(x, t, self.batch)
+        return self.model(x, t, self.batch, precomputed_embeddings=self.precomputed_embeddings)
 
     def forward_CFG(self, x: torch.Tensor, t: torch.Tensor, **extras):
         pc_cond = self.batch["semi_dense_points"]
@@ -546,7 +606,7 @@ class WrappedModel(ModelWrapper):
             pc_cond.feats, pc_cond.coords, pc_cond.stride
         )
         t = t[None].expand(x.shape[0])
-        condition_v = self.model(x, t, self.batch)
-        no_condition_v = self.model(x, t, self.batch, unconditional="no_condition")
+        condition_v = self.model(x, t, self.batch, precomputed_embeddings=self.precomputed_embeddings)
+        no_condition_v = self.model(x, t, self.batch, unconditional="no_condition", precomputed_embeddings=self.precomputed_embeddings)
         out = no_condition_v + self.cfg_value * (condition_v - no_condition_v)
         return out

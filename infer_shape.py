@@ -40,6 +40,8 @@ import sys
 # Add current directory to path to support importing video_to_pkl
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from video_to_pkl import process_video
+import VRAM
+import gc
 
 # @lint-ignore-every PYTHONPICKLEISBAD
 
@@ -168,6 +170,10 @@ def main():
     vae = MichelangeloLikeAutoencoderWrapper(
         "checkpoints/vae-088-0-bfloat16.ckpt", device
     )
+    val = vae.model.to(dtype=torch.float16)
+    
+    print("Model loaded successfully.")
+    VRAM.print_vram_usage("After Model Load")
 
     text_feature_extractor = TextFeatureExtractor(device=device)
     text_feature_extractor = text_feature_extractor.to(torch.float16)
@@ -217,14 +223,46 @@ def main():
                 batch, device, dtype=torch.float16
             )
             print(f" Inferring latents for {batch['name']}...")
+            VRAM.print_vram_usage("Start of Batch")
+            
+            # Offloading Logic
+            offload_mode = VRAM.should_offload()
+            precomputed = None
+            
+            if offload_mode:
+                print(">> Offload Mode: Pre-computing embeddings...")
+                precomputed = model.get_condition_embeddings(batch, dtype=torch.float16)
+                
+                print(">> Offloading Encoders to CPU...")
+                if hasattr(model, "dino_ray_extractor"): model.dino_ray_extractor.to("cpu")
+                if hasattr(model, "simple_t5_projection"): model.simple_t5_projection.to("cpu")
+                if hasattr(model, "simple_clip_projection"): model.simple_clip_projection.to("cpu")
+                # text_feature_extractor is separate
+                text_feature_extractor.to("cpu") 
+                torch.cuda.empty_cache()
+                gc.collect()
+                VRAM.print_vram_usage("After Offload")
+
             latents_pred = model.infer_latents(
                 batch,
                 token_shape=token_shape,
-                text_feature_extractor=text_feature_extractor,
+                text_feature_extractor=text_feature_extractor if not offload_mode else None, # Don't use it if offloaded
                 num_steps=num_steps,
                 use_shifted_sampling=use_shifted_sampling,
+                precomputed_embeddings=precomputed
             )
+            VRAM.print_vram_usage("After Flow Matching")
+            
+            # Reload if needed (simple approach: just put them back to device if multiple batches)
+            if offload_mode and len(inference_loader) > 1:
+                print(">> Reloading modules for next batch...")
+                if hasattr(model, "dino_ray_extractor"): model.dino_ray_extractor.to(device)
+                if hasattr(model, "simple_t5_projection"): model.simple_t5_projection.to(device)
+                if hasattr(model, "simple_clip_projection"): model.simple_clip_projection.to(device)
+                text_feature_extractor.to(device)
+                
             mesh = vae.infer_mesh_from_latents(latents_pred)[0]
+            VRAM.print_vram_usage("After VAE Decoding")
             if args.save_visualization:
                 vis_prd_mesh = mesh.copy()
                 vis_tgt_mesh = trimesh.Trimesh(

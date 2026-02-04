@@ -83,14 +83,20 @@ def get_caption(image_path, model_id="Salesforce/blip-image-captioning-base"):
     """Generate caption using a small VLM (BLIP)."""
     print("Generating caption...")
     processor = BlipProcessor.from_pretrained(model_id, cache_dir=str(CACHE_DIR))
-    model = BlipForConditionalGeneration.from_pretrained(model_id, cache_dir=str(CACHE_DIR))
+    model = BlipForConditionalGeneration.from_pretrained(model_id, cache_dir=str(CACHE_DIR), torch_dtype=torch.float16).to("cuda")
     
     raw_image = Image.open(image_path).convert('RGB')
-    inputs = processor(raw_image, return_tensors="pt")
+    inputs = processor(raw_image, return_tensors="pt").to("cuda", torch.float16)
     
     out = model.generate(**inputs)
     caption = processor.decode(out[0], skip_special_tokens=True)
     print(f"Caption: {caption}")
+    
+    # Cleanup memory
+    del model
+    del processor
+    torch.cuda.empty_cache()
+    
     return caption
 
 def segment_object(image_path, point_prompt=None, device="cuda"):
