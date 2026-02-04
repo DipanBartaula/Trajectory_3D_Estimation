@@ -96,11 +96,20 @@ def run_sfm(image_dir, output_path):
 def get_caption(image_path, model_id="Salesforce/blip-image-captioning-base"):
     """Generate caption using a small VLM (BLIP)."""
     print("Generating caption...")
-    processor = BlipProcessor.from_pretrained(model_id, cache_dir=str(CACHE_DIR))
-    model = BlipForConditionalGeneration.from_pretrained(model_id, cache_dir=str(CACHE_DIR), torch_dtype=torch.float16).to("cuda")
+    try:
+        processor = BlipProcessor.from_pretrained(model_id, cache_dir=str(CACHE_DIR))
+        model = BlipForConditionalGeneration.from_pretrained(model_id, cache_dir=str(CACHE_DIR), torch_dtype=torch.float16).to("cuda")
+        device = "cuda"
+    except torch.cuda.OutOfMemoryError:
+        print("Warning: GPU OOM for BLIP. Falling back to CPU for captioning.")
+        torch.cuda.empty_cache()
+        processor = BlipProcessor.from_pretrained(model_id, cache_dir=str(CACHE_DIR))
+        model = BlipForConditionalGeneration.from_pretrained(model_id, cache_dir=str(CACHE_DIR)).to("cpu")
+        device = "cpu"
     
     raw_image = Image.open(image_path).convert('RGB')
-    inputs = processor(raw_image, return_tensors="pt").to("cuda", torch.float16)
+    dtype = torch.float16 if device == "cuda" else torch.float32
+    inputs = processor(raw_image, return_tensors="pt").to(device, dtype)
     
     out = model.generate(**inputs)
     caption = processor.decode(out[0], skip_special_tokens=True)
