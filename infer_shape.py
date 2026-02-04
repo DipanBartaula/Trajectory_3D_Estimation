@@ -121,11 +121,13 @@ def main():
         # Determine device
         device = "cuda" if torch.cuda.is_available() else "cpu"
         
-        # Check for SAM checkpoint in current dir, or assume it's there
-        sam_ckpt = "sam_vit_b_01ec64.pth"
+        # Check for SAM checkpoint
+        sam_ckpt = "checkpoints/sam_vit_b_01ec64.pth"
         if not os.path.exists(sam_ckpt):
-            # Try to grab it if possible or warn. process_video might fail if not found.
-            pass
+            if os.path.exists("sam_vit_b_01ec64.pth"):
+                sam_ckpt = "sam_vit_b_01ec64.pth"
+            else:
+                sam_ckpt = None # Let process_video handle search/download logic
             
         process_video(args.video_path, args.input_pkl, sam_checkpoint=sam_ckpt, device=device)
     
