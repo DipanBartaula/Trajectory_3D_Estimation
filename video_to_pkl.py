@@ -75,25 +75,32 @@ def run_sfm(image_dir, output_path):
         
     # extract features
     sift_opt = pycolmap.SiftExtractionOptions()
-    sift_opt.use_gpu = True
+    if hasattr(sift_opt, 'use_gpu'):
+        sift_opt.use_gpu = True
+        
     try:
-        print("Attempting SfM Feature Extraction on GPU...")
+        print("Attempting SfM Feature Extraction...")
         pycolmap.extract_features(database_path, image_dir, sift_options=sift_opt)
     except Exception as e:
-        print(f"GPU Extraction failed ({e}). Falling back to CPU.")
-        sift_opt.use_gpu = False
+        print(f"Extraction failed ({e}). Retrying with default options.")
+        # Fallback to fresh options (defaults)
+        sift_opt = pycolmap.SiftExtractionOptions()
+        if hasattr(sift_opt, 'use_gpu'): sift_opt.use_gpu = False
         pycolmap.extract_features(database_path, image_dir, sift_options=sift_opt)
     
     # match features
     print("Matching features...")
     match_opt = pycolmap.SiftMatchingOptions()
-    match_opt.use_gpu = True
+    if hasattr(match_opt, 'use_gpu'):
+        match_opt.use_gpu = True
+        
     try:
-        print("Attempting SfM Matching on GPU...")
+        print("Attempting SfM Matching...")
         pycolmap.match_exhaustive(database_path, matching_options=match_opt)
     except Exception as e:
-        print(f"GPU Matching failed ({e}). Falling back to CPU.")
-        match_opt.use_gpu = False
+        print(f"Matching failed ({e}). Retrying with default options.")
+        match_opt = pycolmap.SiftMatchingOptions()
+        if hasattr(match_opt, 'use_gpu'): match_opt.use_gpu = False
         pycolmap.match_exhaustive(database_path, matching_options=match_opt)
     
     # map
