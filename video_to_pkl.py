@@ -19,7 +19,7 @@ from segment_anything import sam_model_registry, SamPredictor
 CACHE_DIR = Path(__file__).parent / "checkpoints" / "huggingface"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-def extract_frames(video_path, output_dir, target_fps=2):
+def extract_frames(video_path, output_dir, target_fps=7):
     """Extract frames from video to a directory at a specific FPS."""
     print(f"Extracting frames from {video_path} at {target_fps} fps...")
     if not os.path.exists(output_dir):
@@ -182,6 +182,7 @@ def process_video(video_path, output_pkl, sam_checkpoint=None, device="cuda"):
         return
 
     # Center and scale points
+    center = np.mean(points3D, axis=0) # Fix: Define center
     points3D_centered = points3D - center
     scale = np.max(np.abs(points3D_centered))
     print(f"3D Model Centered at {center}, Scale factor: {scale}")
