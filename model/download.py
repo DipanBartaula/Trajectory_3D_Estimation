@@ -12,12 +12,19 @@ def setup_checkpoints():
     try:
         snapshot_download(
             repo_id="facebook/ShapeR",
-            allow_patterns=["*.ckpt", "*.yaml", "*.pth"],
+            allow_patterns=["*.ckpt", "*.yaml"],
             local_dir="./checkpoints",
         )
     except Exception as e:
-        print(f"Error downloading checkpoints: {e}")
-        print(
-            "Are you sure you are logged in to huggingface? (`huggingface_cli login`)"
+        print(f"Error downloading generic checkpoints: {e}")
+        print("Note: If you don't have access to facebook/ShapeR, please place .ckpt and .yaml files in checkpoints/ manually.")
+    
+    # Download SAM Checkpoint specifically
+    sam_ckpt = Path("checkpoints/sam_vit_b_01ec64.pth")
+    if not sam_ckpt.exists():
+        print("Downloading SAM checkpoint...")
+        import torch
+        torch.hub.download_url_to_file(
+            "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth",
+            str(sam_ckpt)
         )
-        exit(1)
