@@ -41,7 +41,11 @@ def extract_frames(video_path, output_dir):
         frame_count += 1
     
     cap.release()
+    cap.release()
     print(f"Extracted {frame_count} frames.")
+    if frame_count > 0:
+        first_frame = cv2.imread(frame_paths[0])
+        print(f"Frame resolution: {first_frame.shape}")
     return frame_paths
 
 def run_sfm(image_dir, output_path):
@@ -60,15 +64,19 @@ def run_sfm(image_dir, output_path):
     pycolmap.extract_features(database_path, image_dir)
     
     # match features
+    print("Matching features...")
     pycolmap.match_exhaustive(database_path)
     
     # map
+    print("Running incremental mapping...")
     maps = pycolmap.incremental_mapping(database_path, image_dir, output_path)
     
     if not maps:
         raise RuntimeError("SfM failed to reconstruct any model.")
         
     # Return the largest reconstruction
+    if maps and 0 in maps:
+        print(f"Reconstruction successful. Points: {len(maps[0].points3D)}, Images: {len(maps[0].images)}")
     return maps[0]
 
 def get_caption(image_path, model_id="Salesforce/blip-image-captioning-base"):
@@ -138,9 +146,10 @@ def process_video(video_path, output_pkl, sam_checkpoint="sam_vit_b_01ec64.pth",
         return
 
     # Center and scale points
-    center = np.mean(points3D, axis=0)
     points3D_centered = points3D - center
     scale = np.max(np.abs(points3D_centered))
+    print(f"3D Model Centered at {center}, Scale factor: {scale}")
+    print(f"Total 3D Points: {len(points3D)}")
     
     # 3. Captioning
     # Use the middle frame for captioning
@@ -168,8 +177,8 @@ def process_video(video_path, output_pkl, sam_checkpoint="sam_vit_b_01ec64.pth",
     
     sorted_image_ids = sorted(rec_images.keys())
     
-    print("Processing frames and segmenting...")
-    for img_id in tqdm(sorted_image_ids):
+    print(f"Processing {len(sorted_image_ids)} frames and segmenting...")
+    for img_idx, img_id in enumerate(tqdm(sorted_image_ids)):
         im_obj = rec_images[img_id]
         name = im_obj.name
         frame_path = frames_dir / name
@@ -260,6 +269,9 @@ def process_video(video_path, output_pkl, sam_checkpoint="sam_vit_b_01ec64.pth",
             
             pkl_visible_points_model[-1] = np.array(kept_indices)
             pkl_object_point_projections[-1] = torch.tensor(np.array(kept_uvs), dtype=torch.float32)
+
+            if img_idx % 10 == 0:
+                print(f"  Frame {img_idx}: valid_uvs={len(valid_uvs)}, kept_after_mask={len(kept_uvs)}")
             
     # Construct final Pickle Dict
     data = {

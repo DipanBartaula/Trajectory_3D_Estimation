@@ -131,6 +131,8 @@ def main():
         # Fallback default if nothing provided (though arguments usually handle defaults, we changed default to None)
         args.input_pkl = "ADT1292__stool.pkl"
         print(f"No input provided, using default: {args.input_pkl}")
+    
+    print(f"Inference Config: {args.config} (Views: {preset_configs[args.config][0]}, Tokens*:{preset_configs[args.config][1]}, Steps: {preset_configs[args.config][2]})")
 
     num_images, token_multiplier, num_steps = preset_configs[args.config]
 
@@ -161,6 +163,7 @@ def main():
     model = ShapeRDenoiser(config).to(device)
     model.convert_to_fp16()
     model.load_state_dict(state_dict, strict=False)
+    print("Model loaded successfully.")
 
     vae = MichelangeloLikeAutoencoderWrapper(
         "checkpoints/vae-088-0-bfloat16.ckpt", device
@@ -208,10 +211,12 @@ def main():
         collate_fn=inference_dataset.custom_collate,
     )
     with torch.no_grad():
+        print(f"Starting inference loop for {len(inference_loader)} batches...")
         for batch in tqdm(inference_loader):
             batch = InferenceDataset.move_batch_to_device(
                 batch, device, dtype=torch.float16
             )
+            print(f" Inferring latents for {batch['name']}...")
             latents_pred = model.infer_latents(
                 batch,
                 token_shape=token_shape,
@@ -258,6 +263,7 @@ def main():
             # convert to glb
             mesh = trimesh.load(tmp_output_path_mesh, force="mesh")
             mesh.export(output_dir / (batch["name"][0] + ".glb"), include_normals=True)
+            print(f"Saved result for {batch['name'][0]} to {output_dir / (batch['name'][0] + '.glb')}")
 
 
 if __name__ == "__main__":
