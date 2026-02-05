@@ -330,12 +330,26 @@ def process_video(video_path, output_pkl, sam_checkpoint=None, device="cuda"):
                   R = im_obj.rotation_matrix()
 
         # Check for translation
+        t = np.zeros(3)
         if hasattr(im_obj, "tvec"):
             t = im_obj.tvec
+        elif rigid3d is not None and hasattr(rigid3d, "translation"):
+             t = rigid3d.translation
         elif hasattr(im_obj, "cam_from_world"):
-            t = im_obj.cam_from_world.translation
-        else:
-            t = np.zeros(3)
+            val = im_obj.cam_from_world
+            # If we didn't get rigid3d above (e.g. earlier if block failed or didn't run)
+            # Try to get it again
+            r3d = None
+            if callable(val):
+                try:
+                    r3d = val()
+                except:
+                    pass
+            else:
+                 r3d = val
+            
+            if r3d is not None and hasattr(r3d, "translation"):
+                 t = r3d.translation
 
         T_cw = np.eye(4)
         T_cw[:3, :3] = R
