@@ -78,21 +78,33 @@ def _make_dinov2_model(
              if os.path.exists(full_url_path):
                  state_dict = torch.load(full_url_path, map_location="cpu")
              else:
-                 # Last resort: Try downloading from Hugging Face mirror as official Meta URL is 403 Forbidden
+                 # Last resort: Try downloading from Hugging Face mirror
                  # Repo: facebook/dinov2-with-registers
-                 fallback_url = f"https://huggingface.co/facebook/dinov2-with-registers/resolve/main/{ckpt_filename}"
-                 print(f"Checkpoint not found locally. Downloading from {fallback_url}...")
+                 print(f"Checkpoint not found locally. Downloading from Hugging Face (facebook/dinov2-with-registers)...")
                  
-                 # Ensure checkpoints dir exists
-                 os.makedirs("checkpoints", exist_ok=True)
                  try:
+                     from huggingface_hub import hf_hub_download
+                     # Download directly to the expected local path
+                     downloaded_path = hf_hub_download(
+                        repo_id="facebook/dinov2-with-registers",
+                        filename=ckpt_filename,
+                        local_dir="checkpoints",
+                        local_dir_use_symlinks=False
+                     )
+                     local_path = downloaded_path
+                 except ImportError:
+                     print("huggingface_hub not installed. Trying fallback URL download...")
+                     fallback_url = f"https://huggingface.co/facebook/dinov2-with-registers/resolve/main/{ckpt_filename}"
                      torch.hub.download_url_to_file(fallback_url, local_path)
                  except Exception as e:
-                     print(f"Failed to download from Hugging Face: {e}")
-                     # Try original one just in case, or another mirror
-                     print("Trying alternate source...")
+                     print(f"Failed to download from Hugging Face via API: {e}")
+                     print("Trying alternate direct URL source...")
                      alt_url = f"https://dl.fbaipublicfiles.com/dinov2/{model_full_name}/{ckpt_filename}"
-                     torch.hub.download_url_to_file(alt_url, local_path)
+                     try:
+                        torch.hub.download_url_to_file(alt_url, local_path)
+                     except Exception as e2:
+                        print(f"Alternate download also failed: {e2}")
+                        raise e 
 
                  state_dict = torch.load(local_path, map_location="cpu")
 
