@@ -288,11 +288,36 @@ def process_video(video_path, output_pkl, sam_checkpoint=None, device="cuda"):
                 pass
                 
         if np.allclose(R, np.eye(3)): # specific check if rotmat failed or wasn't found
+             # Check if we can get rotation from cam_from_world
+             # Note: in some versions cam_from_world is a property returning Rigid3d
+             # in others it might be a method? Or the error implies we accessed something wrong.
+             
+             rigid3d = None
              if hasattr(im_obj, "cam_from_world"):
-                  # Newer pycolmap >= 0.4.0
-                  # cam_from_world is a Rigid3d object
-                  R = im_obj.cam_from_world.rotation.matrix()
-             elif hasattr(im_obj, "qvec"):
+                 val = im_obj.cam_from_world
+                 # If it's a method, call it
+                 if callable(val):
+                     try:
+                         rigid3d = val()
+                     except:
+                         pass
+                 else:
+                     rigid3d = val
+
+             if rigid3d is not None:
+                 if hasattr(rigid3d, "rotation"):
+                     rot = rigid3d.rotation
+                     if hasattr(rot, "matrix"):
+                         R = rot.matrix()
+                     elif hasattr(rot, "to_matrix"):
+                         R = rot.to_matrix()
+                     elif callable(rot): # maybe rotation() method
+                         try:
+                             R = rot().matrix() 
+                         except:
+                             pass
+
+             if np.allclose(R, np.eye(3)) and hasattr(im_obj, "qvec"):
                   # Fallback: convert qvec to rotmat manually
                   # COLMAP qvec is [w, x, y, z]
                   w, x, y, z = im_obj.qvec
@@ -301,7 +326,7 @@ def process_video(video_path, output_pkl, sam_checkpoint=None, device="cuda"):
                       [2*x*y + 2*z*w, 1 - 2*x*x - 2*z*z, 2*y*z - 2*x*w],
                       [2*x*z - 2*y*w, 2*y*z + 2*x*w, 1 - 2*x*x - 2*y*y]
                   ])
-             elif hasattr(im_obj, "rotation_matrix"):
+             elif np.allclose(R, np.eye(3)) and hasattr(im_obj, "rotation_matrix"):
                   R = im_obj.rotation_matrix()
 
         # Check for translation
