@@ -1,4 +1,5 @@
 import argparse
+import random
 import os
 import cv2
 import numpy as np
@@ -212,8 +213,15 @@ def process_video(video_path, output_pkl, sam_checkpoint=None, device="cuda"):
     pkl_camera_params = []
     pkl_visible_points_model = [] 
     
-    point3d_id_to_idx = {p_id: i for i, p_id in enumerate(reconstruction.points3D.keys())}
-    points_model_array = np.array([reconstruction.points3D[p_id].xyz for p_id in reconstruction.points3D.keys()])
+    # Limit point count to prevent torchsparse CUDA configuration errors
+    all_point_ids = list(reconstruction.points3D.keys())
+    MAX_POINTS = 50000 
+    if len(all_point_ids) > MAX_POINTS:
+        print(f"Downsampling points from {len(all_point_ids)} to {MAX_POINTS} for compatibility...")
+        all_point_ids = random.sample(all_point_ids, MAX_POINTS)
+
+    point3d_id_to_idx = {p_id: i for i, p_id in enumerate(all_point_ids)}
+    points_model_array = np.array([reconstruction.points3D[p_id].xyz for p_id in all_point_ids])
     
     # SAM Model Load
     print("Loading SAM...")

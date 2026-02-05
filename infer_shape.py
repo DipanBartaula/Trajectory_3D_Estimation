@@ -197,7 +197,7 @@ def main():
     text_feature_extractor = TextFeatureExtractor(device=device)
     text_feature_extractor = text_feature_extractor.to(torch.float16)
 
-    model = torch.compile(model, fullgraph=True)
+    # model = torch.compile(model, fullgraph=True) # Disable for stability with torchsparse/offloading
     model = model.eval()
     vae.model.use_udf_extraction = True
     vae.model.udf_iso = 0.375
