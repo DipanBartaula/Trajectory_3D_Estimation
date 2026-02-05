@@ -160,29 +160,35 @@ class ShapeRDenoiser(nn.Module):
     #     next(self.parameters()).dtype
 
     def forward(
-        self, x_t, t, batch, unconditional="all_condition", return_intermediate=False
+        self,
+        x_t,
+        t,
+        batch,
+        unconditional="all_condition",
+        return_intermediate=False,
+        precomputed_embeddings=None,
     ):
         if unconditional == "all_condition" or unconditional == "one_condition":
             if "point" in self.input_types:
-                pc_cond = batch["semi_dense_points"]
-                # pc_cond.feats = pc_cond.feats.to(x_t.dtype)
+                pc_cond = batch.get("semi_dense_points", None)
             else:
                 pc_cond = None
 
             if "image" in self.input_types:
-                img_in = batch["images"]
-                cam_ext = batch["camera_extrinsics"]
-                cam_int = batch["camera_intrinsics"]
-                msk_in = batch["masks_ingest"]
-                box_in = batch["boxes_ingest"]
+                img_in = batch.get("images", None)
+                cam_ext = batch.get("camera_extrinsics", None)
+                cam_int = batch.get("camera_intrinsics", None)
+                msk_in = batch.get("masks_ingest", None)
+                box_in = batch.get("boxes_ingest", None)
             else:
                 img_in = None
                 cam_ext = None
                 cam_int = None
                 msk_in = None
+                box_in = None
 
-            txt_in_t5 = batch["t5_text"]
-            txt_in_clip = batch["clip_text"]
+            txt_in_t5 = batch.get("t5_text", None)
+            txt_in_clip = batch.get("clip_text", None)
 
             skipped_condition = None
             if unconditional == "one_condition":
@@ -208,10 +214,12 @@ class ShapeRDenoiser(nn.Module):
                 t,
                 skipped_condition,
                 return_intermediate=return_intermediate,
+                precomputed_embeddings=precomputed_embeddings,
             )
         elif unconditional == "no_condition":
             return self.forward_uncond_impl(
-                x_t, t, return_intermediate=return_intermediate
+                x_t, t, return_intermediate=return_intermediate,
+                precomputed_embeddings=precomputed_embeddings
             )
 
     def get_x0_from_input(self, batch, token_shape=None):
@@ -232,7 +240,7 @@ class ShapeRDenoiser(nn.Module):
         x_0 = x_0.to(self.null_context.dtype)
         return x_0
 
-    def forward_uncond_impl(self, z_x_t, t, return_intermediate=False):
+    def forward_uncond_impl(self, z_x_t, t, return_intermediate=False, precomputed_embeddings=None):
         num_in_tokens = z_x_t.shape[1]
         z_x_t_in = self.simple_latent_projection(z_x_t)
 

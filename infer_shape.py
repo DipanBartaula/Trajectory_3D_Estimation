@@ -250,6 +250,10 @@ def main():
             
             if offload_mode:
                 print(">> Offload Mode: Pre-computing embeddings...")
+                # Ensure text features are in batch if needed
+                if "text" in model.input_types:
+                    batch["t5_text"], batch["clip_text"] = text_feature_extractor(batch["caption"])
+                
                 precomputed = model.get_condition_embeddings(batch, dtype=torch.float16)
                 
                 print(">> Offloading Encoders to CPU...")
