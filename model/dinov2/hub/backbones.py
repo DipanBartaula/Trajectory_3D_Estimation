@@ -78,12 +78,22 @@ def _make_dinov2_model(
              if os.path.exists(full_url_path):
                  state_dict = torch.load(full_url_path, map_location="cpu")
              else:
-                 # Last resort: Try downloading from official Meta Research URL if base url isn't helping
-                 fallback_url = f"https://dl.fbaipublicfiles.com/dinov2/{model_full_name}/{ckpt_filename}"
-                 print(f"Checkpoint not found at {local_path} or {_DINOV2_BASE_URL}. Downloading from {fallback_url}...")
+                 # Last resort: Try downloading from Hugging Face mirror as official Meta URL is 403 Forbidden
+                 # Repo: facebook/dinov2-with-registers
+                 fallback_url = f"https://huggingface.co/facebook/dinov2-with-registers/resolve/main/{ckpt_filename}"
+                 print(f"Checkpoint not found locally. Downloading from {fallback_url}...")
+                 
                  # Ensure checkpoints dir exists
                  os.makedirs("checkpoints", exist_ok=True)
-                 torch.hub.download_url_to_file(fallback_url, local_path)
+                 try:
+                     torch.hub.download_url_to_file(fallback_url, local_path)
+                 except Exception as e:
+                     print(f"Failed to download from Hugging Face: {e}")
+                     # Try original one just in case, or another mirror
+                     print("Trying alternate source...")
+                     alt_url = f"https://dl.fbaipublicfiles.com/dinov2/{model_full_name}/{ckpt_filename}"
+                     torch.hub.download_url_to_file(alt_url, local_path)
+
                  state_dict = torch.load(local_path, map_location="cpu")
 
         model.load_state_dict(state_dict, strict=True)
