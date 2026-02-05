@@ -9,6 +9,7 @@ from enum import Enum
 from typing import Union
 
 import torch
+import os
 
 from .utils import _DINOV2_BASE_URL, _make_dinov2_model_name
 
@@ -58,8 +59,33 @@ def _make_dinov2_model(
         model_full_name = _make_dinov2_model_name(
             arch_name, patch_size, num_register_tokens
         )
-        url = _DINOV2_BASE_URL + f"/{model_full_name}_pretrain.pth"
-        state_dict = torch.load(url, map_location="cpu")
+        # Check standard checkpoints location
+        ckpt_filename = f"{model_full_name}_pretrain.pth"
+        local_path = f"checkpoints/{ckpt_filename}"
+        
+        if os.path.exists(local_path):
+             print(f"Loading DINOv2 weights from local file: {local_path}")
+             state_dict = torch.load(local_path, map_location="cpu")
+        elif "https://" in _DINOV2_BASE_URL or "http://" in _DINOV2_BASE_URL:
+             # It's a URL, use hub load
+             print(f"Downloading/Loading DINOv2 weights from URL: {_DINOV2_BASE_URL}/{ckpt_filename}")
+             state_dict = torch.hub.load_state_dict_from_url(
+                 _DINOV2_BASE_URL + f"/{ckpt_filename}", map_location="cpu"
+             )
+        else:
+             # Assume it's a path but file is missing
+             full_url_path = os.path.join(_DINOV2_BASE_URL, ckpt_filename)
+             if os.path.exists(full_url_path):
+                 state_dict = torch.load(full_url_path, map_location="cpu")
+             else:
+                 # Last resort: Try downloading from official Meta Research URL if base url isn't helping
+                 fallback_url = f"https://dl.fbaipublicfiles.com/dinov2/{model_full_name}/{ckpt_filename}"
+                 print(f"Checkpoint not found at {local_path} or {_DINOV2_BASE_URL}. Downloading from {fallback_url}...")
+                 # Ensure checkpoints dir exists
+                 os.makedirs("checkpoints", exist_ok=True)
+                 torch.hub.download_url_to_file(fallback_url, local_path)
+                 state_dict = torch.load(local_path, map_location="cpu")
+
         model.load_state_dict(state_dict, strict=True)
 
     return model
