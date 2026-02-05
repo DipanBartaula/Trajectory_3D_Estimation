@@ -79,6 +79,14 @@ class InferenceDataset(torch.utils.data.Dataset):
         else:
             selected_semi_dense_points = semi_dense_points
 
+        # Final safety check: limit points to prevent torchsparse CUDA configuration errors
+        MAX_POINTS_INFER = 25000
+        if selected_semi_dense_points.shape[0] > MAX_POINTS_INFER:
+            indices = np.random.choice(
+                selected_semi_dense_points.shape[0], MAX_POINTS_INFER, replace=False
+            )
+            selected_semi_dense_points = selected_semi_dense_points[indices]
+
         sample = {
             "index": idx,
             "name": os.path.basename(self.paths[idx]).split(".")[0],

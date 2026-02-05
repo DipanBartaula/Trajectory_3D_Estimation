@@ -215,13 +215,14 @@ def process_video(video_path, output_pkl, sam_checkpoint=None, device="cuda"):
     
     # Limit point count to prevent torchsparse CUDA configuration errors
     all_point_ids = list(reconstruction.points3D.keys())
-    MAX_POINTS = 50000 
+    MAX_POINTS = 25000 
     if len(all_point_ids) > MAX_POINTS:
         print(f"Downsampling points from {len(all_point_ids)} to {MAX_POINTS} for compatibility...")
         all_point_ids = random.sample(all_point_ids, MAX_POINTS)
 
     point3d_id_to_idx = {p_id: i for i, p_id in enumerate(all_point_ids)}
-    points_model_array = np.array([reconstruction.points3D[p_id].xyz for p_id in all_point_ids])
+    # MUST center the points for ShapeR compatibility
+    points_model_array = np.array([reconstruction.points3D[p_id].xyz - center for p_id in all_point_ids])
     
     # SAM Model Load
     print("Loading SAM...")
@@ -367,6 +368,12 @@ def process_video(video_path, output_pkl, sam_checkpoint=None, device="cuda"):
             
             if r3d is not None and hasattr(r3d, "translation"):
                  t = r3d.translation
+
+        # MUST center the cameras to match centered points
+        # P_cam = R @ P_world + t_old
+        # P_world = P_new_world + center
+        # P_cam = R @ P_new_world + (R @ center + t_old)
+        t = R @ center + t
 
         T_cw = np.eye(4)
         T_cw[:3, :3] = R
