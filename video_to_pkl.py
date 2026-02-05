@@ -268,12 +268,50 @@ def process_video(video_path, output_pkl, sam_checkpoint=None, device="cuda"):
              K[1,1] = f_val
              K[0,2] = cx
              K[1,2] = cy
+        elif model_name == "SIMPLE_RADIAL":
+             f_val, cx, cy, k = cam.params
+             K[0,0] = f_val
+             K[1,1] = f_val
+             K[0,2] = cx
+             K[1,2] = cy
         
         pkl_camera_params.append(torch.tensor(K, dtype=torch.float32))
         
         # 3. Extrinsics (World to Camera)
-        R = im_obj.rotmat()
-        t = im_obj.tvec
+        # Handle different pycolmap versions for rotation matrix
+        R = np.eye(3)
+        if hasattr(im_obj, "rotmat"):
+            try:
+                R = im_obj.rotmat()
+            except TypeError:
+                # Some versions might treat rotmat as a property? unlikely if callable failed
+                pass
+                
+        if np.allclose(R, np.eye(3)): # specific check if rotmat failed or wasn't found
+             if hasattr(im_obj, "cam_from_world"):
+                  # Newer pycolmap >= 0.4.0
+                  # cam_from_world is a Rigid3d object
+                  R = im_obj.cam_from_world.rotation.matrix()
+             elif hasattr(im_obj, "qvec"):
+                  # Fallback: convert qvec to rotmat manually
+                  # COLMAP qvec is [w, x, y, z]
+                  w, x, y, z = im_obj.qvec
+                  R = np.array([
+                      [1 - 2*y*y - 2*z*z, 2*x*y - 2*z*w, 2*x*z + 2*y*w],
+                      [2*x*y + 2*z*w, 1 - 2*x*x - 2*z*z, 2*y*z - 2*x*w],
+                      [2*x*z - 2*y*w, 2*y*z + 2*x*w, 1 - 2*x*x - 2*y*y]
+                  ])
+             elif hasattr(im_obj, "rotation_matrix"):
+                  R = im_obj.rotation_matrix()
+
+        # Check for translation
+        if hasattr(im_obj, "tvec"):
+            t = im_obj.tvec
+        elif hasattr(im_obj, "cam_from_world"):
+            t = im_obj.cam_from_world.translation
+        else:
+            t = np.zeros(3)
+
         T_cw = np.eye(4)
         T_cw[:3, :3] = R
         T_cw[:3, 3] = t
