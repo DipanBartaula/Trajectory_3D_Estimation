@@ -14,6 +14,9 @@ Usage:
 
 import argparse
 import os
+# Increase timeout for Hugging Face downloads to prevent ReadTimeout
+os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] = "120"
+
 from pathlib import Path
 
 import numpy as np

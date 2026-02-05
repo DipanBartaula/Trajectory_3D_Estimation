@@ -237,19 +237,32 @@ def process_video(video_path, output_pkl, sam_checkpoint=None, device="cuda"):
         # 2. Camera Params (Intrinsics)
         cam = reconstruction.cameras[im_obj.camera_id]
         K = np.eye(3)
-        if cam.model_name == "SIMPLE_PINHOLE":
+        if hasattr(cam, "model_name"):
+            model_name = cam.model_name
+        else:
+            # Fallback for newer pycolmap versions where .model is used
+            # and .model might be an enum or string
+            model_name = cam.model
+            if hasattr(model_name, "name"):
+                model_name = model_name.name
+        
+        model_name = str(model_name)
+        print(f"DEBUG: Camera model found: {model_name}")
+
+        K = np.eye(3)
+        if model_name == "SIMPLE_PINHOLE":
             f_val, cx, cy = cam.params
             K[0,0] = f_val
             K[1,1] = f_val
             K[0,2] = cx
             K[1,2] = cy
-        elif cam.model_name == "PINHOLE":
+        elif model_name == "PINHOLE":
             fx, fy, cx, cy = cam.params
             K[0,0] = fx
             K[1,1] = fy
             K[0,2] = cx
             K[1,2] = cy
-        elif cam.model_name == "RADIAL":
+        elif model_name == "RADIAL":
              f_val, cx, cy, k1, k2 = cam.params
              K[0,0] = f_val
              K[1,1] = f_val
