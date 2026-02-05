@@ -211,7 +211,7 @@ def pad_for_rectification(crops, masks, paddedCropsXYWHC, is_ariagen2):
     return pad_crop, pad_mask
 
 
-def rectify_images(images, masks, camera_params):
+def rectify_images(images, masks, camera_params, camera_type="Fisheye624"):
     """Rectify fisheye images to pinhole projection."""
     rectified_images = []
     rectified_masks = []
@@ -234,7 +234,7 @@ def rectify_images(images, masks, camera_params):
             width=width,
             height=height,
             params=camera_param,
-            type_str="Fisheye624",
+            type_str=camera_type,
         ).unsqueeze(0)
         vid_rectified, cam_rectified = rectify_video(video, cam, pinhole_fxy_factor=1.0)
         vid_mask_rectified, _ = rectify_video(

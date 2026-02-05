@@ -275,7 +275,9 @@ def process_video(video_path, output_pkl, sam_checkpoint=None, device="cuda"):
              K[0,2] = cx
              K[1,2] = cy
         
-        pkl_camera_params.append(torch.tensor(K, dtype=torch.float32))
+        # Store as [fx, fy, cx, cy] for compatibility with CameraTW.from_surreal
+        params_4 = np.array([K[0,0], K[1,1], K[0,2], K[1,2]], dtype=np.float32)
+        pkl_camera_params.append(torch.tensor(params_4, dtype=torch.float32))
         
         # 3. Extrinsics (World to Camera)
         # Handle different pycolmap versions for rotation matrix
@@ -424,7 +426,8 @@ def process_video(video_path, output_pkl, sam_checkpoint=None, device="cuda"):
         "category": "object",
         "T_model_world": torch.eye(4, dtype=torch.float32),
         "T_zup_obj": torch.eye(4, dtype=torch.float32),
-        "visible_points_model": pkl_visible_points_model
+        "visible_points_model": pkl_visible_points_model,
+        "camera_type": "pinhole"
     }
     
     print(f"Saving to {output_pkl}...")
