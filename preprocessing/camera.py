@@ -255,8 +255,9 @@ class CameraTW(TensorWrapper):
                     guess_eyevideo, 330 * (height / 480), valid_radius
                 )
                 if torch.any(valid_radius == default_radius):
-                    raise ValueError(
-                        f"Failed to auto-determine valid radius based on aspect ratios (valid_radius {valid_radius}, width {width}, height {height})"
+                    # Fallback to have half of image diagonal as valid radius
+                    valid_radius = (
+                        torch.sqrt((width / 2.0) ** 2 + (height / 2.0) ** 2) + 1.0
                     )
             else:
                 # Note that the valid_radius for pinhole camera is not well-defined.
