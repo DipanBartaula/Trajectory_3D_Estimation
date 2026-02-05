@@ -88,7 +88,7 @@ def _make_dinov2_model(
                      # Explicitly pass token from environment variable if present
                      hf_token = os.getenv("HF_TOKEN")
                      downloaded_path = hf_hub_download(
-                        repo_id="facebook/dinov2-with-registers",
+                        repo_id="facebook/ShapeR",
                         filename=ckpt_filename,
                         local_dir="checkpoints",
                         local_dir_use_symlinks=False,
