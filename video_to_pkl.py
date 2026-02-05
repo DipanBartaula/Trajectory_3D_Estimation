@@ -280,6 +280,7 @@ def process_video(video_path, output_pkl, sam_checkpoint=None, device="cuda"):
         # 3. Extrinsics (World to Camera)
         # Handle different pycolmap versions for rotation matrix
         R = np.eye(3)
+        rigid3d = None
         if hasattr(im_obj, "rotmat"):
             try:
                 R = im_obj.rotmat()
