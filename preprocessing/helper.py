@@ -297,9 +297,10 @@ def plot_dots(uv, W, H):
     img = np.zeros((H, W), dtype=np.float32)
 
     # Create a 2D histogram of the points
-    x = np.clip(uv[:, 0], 0, W - 1).astype(int)
-    y = np.clip(uv[:, 1], 0, H - 1).astype(int)
-    np.add.at(img, (y, x), 1)
+    if uv.ndim == 2 and uv.shape[0] > 0:
+        x = np.clip(uv[:, 0], 0, W - 1).astype(int)
+        y = np.clip(uv[:, 1], 0, H - 1).astype(int)
+        np.add.at(img, (y, x), 1)
 
     return (img * 255).astype(np.uint8)
 

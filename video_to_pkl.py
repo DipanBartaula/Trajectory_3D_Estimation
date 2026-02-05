@@ -380,7 +380,7 @@ def process_video(video_path, output_pkl, sam_checkpoint=None, device="cuda"):
                     valid_uvs.append(p2d.xy)
                     
         pkl_visible_points_model.append(np.array(valid_3d_indices))
-        pkl_object_point_projections.append(torch.tensor(np.array(valid_uvs), dtype=torch.float32))
+        pkl_object_point_projections.append(torch.tensor(np.array(valid_uvs).reshape(-1, 2), dtype=torch.float32))
         
         # 5. Segmentation & Filtering
         img_cv2 = cv2.imread(str(frame_path))
@@ -413,7 +413,7 @@ def process_video(video_path, output_pkl, sam_checkpoint=None, device="cuda"):
                         kept_uvs.append(uv)
             
             pkl_visible_points_model[-1] = np.array(kept_indices)
-            pkl_object_point_projections[-1] = torch.tensor(np.array(kept_uvs), dtype=torch.float32)
+            pkl_object_point_projections[-1] = torch.tensor(np.array(kept_uvs).reshape(-1, 2), dtype=torch.float32)
 
             if img_idx % 10 == 0:
                 print(f"  Frame {img_idx}: valid_uvs={len(valid_uvs)}, kept_after_mask={len(kept_uvs)}")
