@@ -63,7 +63,6 @@ def get_image_data_based_on_strategy(
         torch.from_numpy(np.array([x[1] for x in selected_image_data])),
         torch.from_numpy(np.array([x[2] for x in selected_image_data])).unsqueeze(-1),
         torch.from_numpy(np.array([x[3] for x in selected_image_data])),
-        camera_type=pkl_sample.get("camera_type", "Fisheye624"),
     )
 
     # rotate if SLAM Aria Gen2 or just RGB
