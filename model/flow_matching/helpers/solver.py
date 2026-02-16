@@ -54,8 +54,16 @@ class ODESolver:
         Returns:
           The last timestep when return_intermediates=False, otherwise all values specified in time_grid.
         """
+        print(f"\n[DEBUG] Flow Matching ODE Sampling Started")
+        print(f"  - Method: {method}")
+        print(f"  - Steps in grid: {len(time_grid)}")
+        print(f"  - Device: {x_init.device}")
 
+        step_counter = 0
         def ode_func(t, x):
+            nonlocal step_counter
+            step_counter += 1
+            # We don't print here to keep logic clean, WrappedModel handles it
             return self.velocity_model(x=x, t=t, **model_extras)
 
         ode_opts = {"step_size": step_size} if step_size is not None else {}

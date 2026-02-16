@@ -111,7 +111,14 @@ class TextFeatureExtractor:
 
 class DummyTextFeatureExtractor:
     def __init__(self, device):
-        pass
+        self.device = device
+
+    def to(self, dtype):
+        return self
 
     def __call__(self, captions):
-        return None, None
+        # Return zeros matching expected T5 (2048) and CLIP (768) dimensions
+        batch_size = len(captions)
+        t5_out = torch.zeros((batch_size, 256, 2048), device=self.device, dtype=torch.float16)
+        clip_out = torch.zeros((batch_size, 768), device=self.device, dtype=torch.float16)
+        return t5_out, clip_out

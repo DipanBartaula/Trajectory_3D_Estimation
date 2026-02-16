@@ -1,102 +1,86 @@
-## ShapeR: Robust Conditional 3D Shape Generation from Casual Captures
+# ShapeR: Trajectory 3D Estimation Edition
 
-![teaser](resources/Teaser.jpg)
+[![teaser](resources/Teaser.jpg)](http://facebookresearch.github.io/ShapeR)
 
-ShapeR introduces a novel approach to metric shape generation. Given an input image sequence, preprocessing extracts per-object metric sparse SLAM points, images, poses, and captions using off-the-shelf methods. A rectified flow transformer operating on VecSet latents conditions on these multimodal inputs to generate a shape code, which is decoded into the object’s mesh. By applying the model object-centrically to each detected object, we obtain a metric reconstruction of the entire scene.
+This repository provides an end-to-end pipeline for reconstructing **metric 3D meshes** from casual handheld videos. It integrates the ShapeR flow-matching architecture with a custom SLAM-based preprocessing pipeline (SfM + DINO + SAM).
 
-[Project Page](http://facebookresearch.github.io/ShapeR)  |  [Paper](https://cdn.jsdelivr.net/gh/facebookresearch/ShapeR@main/resources/ShapeR.pdf) | [Arxiv](https://arxiv.org/abs/2601.11514)  |  [Video](https://www.youtube.com/watch?v=EbY30KAA55I)  |  [HF-Model](https://huggingface.co/facebook/ShapeR/)  |  [HF Evaluation Dataset](https://huggingface.co/datasets/facebook/ShapeR-Evaluation)
+## 🚀 Quick Start (Complete Pipeline)
 
-## Installation
-
-Refer to [INSTALL.md](INSTALL.md) for detailed instructions on setting up the environment.
-
-## Usage
-
-### Inference
+You can now go from a raw `.mp4` video to a 3D mesh with a single command. The pipeline automatically handles SfM, point cloud generation, and shape reconstruction.
 
 ```bash
-python infer_shape.py --input_pkl <sample.pkl> --config balance --output_dir output
+# Full inference with text conditioning (best quality)
+bash bash/run_inference.sh path/to/video.mp4
+
+# Fast inference without text (lower VRAM, much faster)
+bash bash/run_inference_text.sh path/to/video.mp4
 ```
 
-**Arguments:**
-- `--input_pkl`: Path to preprocessed pickle file (relative to `data/`)
-- `--config`: Preset configuration
-  - `quality`: 16 views, 50 steps (best quality, slowest)
-  - `balance`: 16 views, 25 steps (recommended)
-  - `speed`: 4 views, 10 steps (fastest)
-- `--output_dir`: Output directory for meshes and visualizations
-- `--do_transform_to_world`: Transform output mesh to world coordinates
-- `--remove_floating_geometry`: Remove disconnected mesh components (default: on)
-- `--simplify_mesh`: Reduce mesh complexity (default: on)
-- `--save_visualization`: Save comparison visualization (default: off)
+## ✨ Repository Enhancements
 
-### Example
+This version of ShapeR includes several optimizations for research and production:
 
-```bash
-python infer_shape.py --input_pkl ADT1292__stool.pkl --config balance
-```
+*   **⚡ Smart Caching**: SfM results are saved to `data/processed/*.pkl`. If you run inference on the same video again, it skips the slow SfM step.
+*   **📉 VRAM Optimized**: Includes automatic model offloading logic. Use `bash/run_inference_text.sh` to run the model without the heavy T5/CLIP text encoders.
+*   **🖥️ Windows & Linux Support**: Fully compatible with both Windows and Linux filesystems and CUDA configurations.
+*   **🛠️ Debug Mode**: Extensive logging showing real-time Flow Matching ODE steps and VRAM usage.
+*   **📂 Organized Workspace**: 
+    *   `bash/`: All orchestration and setup scripts.
+    *   `tests/`: Component-level and pipeline-level test scripts.
+    *   `mesh_directory/`: Dedicated output folder for final `.glb` meshes.
+    *   `output_shaper/`: Visualization reports (comparison images).
 
-**Output:**
-- `<name>.glb`: Reconstructed 3D mesh
-- `VIS__<name>.jpg`: Visualization comparing input, prediction, and ground truth (--save_visualization is passed)
+## 🛠️ Installation
 
-![Example visualization](resources/output_vis_example.jpg)
+1.  **Environment Setup**:
+    ```bash
+    bash bash/setup_env.sh
+    conda activate shaper
+    ```
+2.  **Weights**: The models will automatically download on first run (requires ~15GB space).
+3.  **Hugging Face (Optional)**: If using text conditioning, you may need to set your HF token:
+    ```bash
+    source bash/set_hf_token.sh <YOUR_TOKEN>
+    ```
 
-## Data Format
+## 📖 Script Catalog
 
-This codebase assumes that a sequence has already been processed using the Aria MPS pipeline, along with an 3D object instance detector, resulting in the pickle files with the preprocessed data required for ShapeR ingestion.
+| Script | Purpose |
+| :--- | :--- |
+| `bash/run_inference.sh` | Full end-to-end video-to-mesh reconstruction. |
+| `bash/run_inference_text.sh` | Skips text encoders to save ~6GB VRAM and time. |
+| `bash/setup_env.sh` | Automated environment creation and dependency install. |
+| `bash/test_pipeline_no_text.sh` | Rapidly test the pipeline using the latest processed cache. |
+| `tests/test_vae.py` | Verify 3D VAE decoding functionality. |
+| `tests/test_denoiser.py` | Verify Flow Matching weights and config. |
 
-We release the **ShapeR Evaluation Dataset** containing preprocessed samples from Aria glasses captures. Each sample is a pickle file with point clouds, multi-view images, camera parameters, text captions, and ground truth meshes.
+## 📦 Output Formats
 
-For a detailed walkthrough of the data format, see the **[`explore_data.ipynb`](explore_data.ipynb)** notebook which includes:
-- Complete pickle file structure with all keys and their dimensions
-- Interactive 3D visualization of point clouds and meshes
-- Camera position visualization
-- Image and mask grid displays
-- DataLoader usage examples for both SLAM and RGB variants
-- Explanation of view selection strategies
+*   **Mesh**: Saved as `.glb` in `mesh_directory/`. Perfectly scaled and oriented.
+*   **Visual Report**: Saved as `VIS__*.jpg` in `output_shaper/`, showing the input images, point cloud, and reconstruction.
+*   **Cache**: SfM points and camera poses saved in `data/processed/`.
 
-## Project Structure
+---
 
-```
-ShapeR/
-├── infer_shape.py          # Main inference script
-├── explore_data.ipynb      # Data exploration notebook
-├── dataset/
-│   ├── shaper_dataset.py   # Dataset and dataloader
-│   ├── image_processor.py  # View selection and image preprocessing
-│   └── point_cloud.py      # Point cloud to SparseTensor
-├── model/
-│   ├── flow_matching/
-│   │   └── shaper_denoiser.py  # Flow matching denoiser
-│   ├── vae3d/
-│   │   └── autoencoder.py      # 3D VAE for mesh generation
-│   ├── pointcloud_encoder.py   # Sparse 3D convolution encoder
-│   └── dino_and_ray_feature_extractor.py  # Image feature extraction
-├── preprocessing/
-│   └── helper.py           # Fisheye rectification, camera utils
-├── postprocessing/
-│   └── helper.py           # Mesh cleanup, visualization
-├── checkpoints/            # Model weights (downloaded automatically)
-└── data/                   # Input pickle files
-```
+## 🔬 Scientific Background
 
-## License
+ShapeR introduces a novel approach to metric shape generation. It utilizes:
+1.  **Metric SLAM**: Extraction of metric sparse points and poses.
+2.  **VecSet Latents**: A rectified flow transformer for multimodal conditioning.
+3.  **3D VAE**: Decoding latent codes into high-quality meshes.
 
-The majority of ShapeR is licensed under CC-BY-NC. See the [LICENSE](LICENSE) file for details. However portions of the project are available under separate license terms: see [NOTICE](NOTICE).
+[Project Page](http://facebookresearch.github.io/ShapeR) | [Paper](https://arxiv.org/abs/2601.11514) | [HF Evaluation Dataset](https://huggingface.co/datasets/facebook/ShapeR-Evaluation)
 
-## Citation
+## 📄 License & Citation
 
-If you find ShapeR useful for your research, please cite our paper:
+Licensed under **CC-BY-NC**. See [LICENSE](LICENSE) for details.
 
 ```bibtex
 @misc{siddiqui2026shaperrobustconditional3d,
       title={ShapeR: Robust Conditional 3D Shape Generation from Casual Captures}, 
-      author={Yawar Siddiqui and Duncan Frost and Samir Aroudj and Armen Avetisyan and Henry Howard-Jenkins and Daniel DeTone and Pierre Moulon and Qirui Wu and Zhengqin Li and Julian Straub and Richard Newcombe and Jakob Engel},
+      author={Yawar Siddiqui and others},
       year={2026},
       eprint={2601.11514},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV},
       url={https://arxiv.org/abs/2601.11514}, 
 }
 ```

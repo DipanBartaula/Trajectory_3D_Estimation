@@ -451,6 +451,7 @@ def process_video(video_path, output_pkl, sam_checkpoint=None, device="cuda"):
     }
     
     print(f"Saving to {output_pkl}...")
+    os.makedirs(os.path.dirname(os.path.abspath(output_pkl)), exist_ok=True)
     with open(output_pkl, "wb") as f:
         pickle.dump(data, f)
     

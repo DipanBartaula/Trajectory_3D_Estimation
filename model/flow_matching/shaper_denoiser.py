@@ -601,6 +601,8 @@ class WrappedModel(ModelWrapper):
             self.forward = self.forward_no_CFG
 
     def forward_no_CFG(self, x: torch.Tensor, t: torch.Tensor, **extras):
+        import VRAM
+        print(f"  [ODE STEP] t={t.item():.4f} | VRAM: {torch.cuda.memory_allocated()/1e9:.2f}GB")
         pc_cond = self.batch["semi_dense_points"]
         self.batch["semi_dense_points"] = SparseTensor(
             pc_cond.feats, pc_cond.coords, pc_cond.stride
@@ -609,6 +611,8 @@ class WrappedModel(ModelWrapper):
         return self.model(x, t, self.batch, precomputed_embeddings=self.precomputed_embeddings)
 
     def forward_CFG(self, x: torch.Tensor, t: torch.Tensor, **extras):
+        import VRAM
+        print(f"  [ODE STEP-CFG] t={t.item():.4f} | VRAM: {torch.cuda.memory_allocated()/1e9:.2f}GB")
         pc_cond = self.batch["semi_dense_points"]
         self.batch["semi_dense_points"] = SparseTensor(
             pc_cond.feats, pc_cond.coords, pc_cond.stride

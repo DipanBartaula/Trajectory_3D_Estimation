@@ -37,6 +37,11 @@ def render_mesh_to_image(mesh, color, resolution=(512, 512)):
     Uses Z-up viewing angle for consistent visualization with point cloud.
     Works on headless machines without a display.
     """
+    import numpy as np
+
+    if mesh is None:
+        return np.ones((*resolution, 3), dtype=np.uint8) * 255
+
     import os
 
     # Set offscreen rendering backend before importing pyrender
@@ -383,7 +388,8 @@ def visualize_prediction_and_groundtruth(
 
     axes[3].imshow(target_image)
     axes[3].axis("off")
-    axes[3].set_title("Ground Truth", fontsize=11, fontweight="bold", pad=8)
+    gt_title = "Ground Truth" if target_mesh is not None else "Ground Truth (N/A)"
+    axes[3].set_title(gt_title, fontsize=11, fontweight="bold", pad=8)
 
     # Use subplots_adjust for tight layout
     plt.subplots_adjust(left=0.01, right=0.99, top=0.98, bottom=0.02, wspace=0.02)

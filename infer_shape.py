@@ -106,6 +106,11 @@ def main():
         action="store_true",
         help="Transform the mesh to world coordinates.",
     )
+    parser.add_argument(
+        "--no_text",
+        action="store_true",
+        help="Disable text conditioning and T5/CLIP model loading.",
+    )
 
     args = parser.parse_args()
 
@@ -194,8 +199,12 @@ def main():
     print("Model loaded successfully.")
     VRAM.print_vram_usage("After Model Load")
 
-    text_feature_extractor = TextFeatureExtractor(device=device)
-    text_feature_extractor = text_feature_extractor.to(torch.float16)
+    if not args.no_text:
+        text_feature_extractor = TextFeatureExtractor(device=device)
+        text_feature_extractor = text_feature_extractor.to(torch.float16)
+    else:
+        from model.text.hf_embedder import DummyTextFeatureExtractor
+        text_feature_extractor = DummyTextFeatureExtractor(device=device)
 
     # model = torch.compile(model, fullgraph=True) # Disable for stability with torchsparse/offloading
     model = model.eval()
@@ -237,12 +246,22 @@ def main():
     )
     with torch.no_grad():
         print(f"Starting inference loop for {len(inference_loader)} batches...")
-        for batch in tqdm(inference_loader):
+        for batch in tqdm(inference_loader, desc="Inference Batches"):
+            print(f"\n" + "="*50)
+            print(f"PROCESSING BATCH: {batch['name']}")
+            print(f"="*50)
+            
             batch = InferenceDataset.move_batch_to_device(
                 batch, device, dtype=torch.float16
             )
-            print(f" Inferring latents for {batch['name']}...")
-            VRAM.print_vram_usage("Start of Batch")
+            print(f"[DEBUG] Batch items moved to {device}")
+            for k, v in batch.items():
+                if hasattr(v, 'shape'):
+                    print(f"  - {k}: shape={v.shape}")
+                elif isinstance(v, list):
+                    print(f"  - {k}: list, length={len(v)}")
+            
+            VRAM.print_vram_usage("Start of Batch processing")
             
             # Offloading Logic
             offload_mode = VRAM.should_offload()
@@ -287,16 +306,24 @@ def main():
             mesh = vae.infer_mesh_from_latents(latents_pred)[0]
             VRAM.print_vram_usage("After VAE Decoding")
             if args.save_visualization:
+                print(f"[DEBUG] Generating visualization reports for {batch['name'][0]}...")
                 vis_prd_mesh = mesh.copy()
-                vis_tgt_mesh = trimesh.Trimesh(
-                    vertices=batch["vertices"][0],
-                    faces=batch["faces"][0],
-                )
+                if "vertices" in batch:
+                    print(f"  - Ground Truth mesh found, adding to visualization.")
+                    vis_tgt_mesh = trimesh.Trimesh(
+                        vertices=batch["vertices"][0],
+                        faces=batch["faces"][0],
+                    )
+                else:
+                    print(f"  - No Ground Truth mesh (real video mode).")
+                    vis_tgt_mesh = None
+                
                 vis_points = batch["semi_dense_points_orig"][0]
                 vis_images = batch["images"][0].float().cpu().numpy()
                 vis_masks = batch["images"][0].float().cpu().clone().numpy()
                 vis_masks[:, 1, :, :] = batch["masks_ingest"][0].float().cpu().numpy()
 
+                save_path = os.path.join(output_dir, f"VIS__{batch['name'][0]}.jpg")
                 visualize_prediction_and_groundtruth(
                     vis_prd_mesh,
                     vis_tgt_mesh,
@@ -305,8 +332,9 @@ def main():
                     vis_masks,
                     batch["caption"][0],
                     sample_name=batch["name"][0],
-                    save_path=os.path.join(output_dir, f"VIS__{batch['name'][0]}.jpg"),
+                    save_path=save_path,
                 )
+                print(f"  - Visualization report saved: {save_path}")
             # remove floating geometry, keeping only the largest component
             # sometimes not the best way, but usually works out okay most of the time
 
@@ -316,15 +344,28 @@ def main():
             if args.simplify_mesh:
                 mesh = mesh.simplify_quadric_decimation(face_count=125000)
             # rescale back to the original scale
+            print(f"[DEBUG] Rescaling mesh back to original bounds...")
             mesh = inference_dataset.rescale_back(
                 batch["index"][0], mesh, args.do_transform_to_world
             )
-            tmp_output_path_mesh = "/tmp/mesh.obj"
+            
+            # Use 'mesh_directory' in project root
+            mesh_output_dir = Path("mesh_directory")
+            mesh_output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Use a local temporary path that works on Windows
+            tmp_dir = os.path.join(os.getcwd(), "data", "temp")
+            os.makedirs(tmp_dir, exist_ok=True)
+            tmp_output_path_mesh = os.path.join(tmp_dir, f"{batch['name'][0]}_temp.obj")
+            
+            print(f"[DEBUG] Exporting final .glb to {mesh_output_dir}...")
             mesh.export(tmp_output_path_mesh)
             # convert to glb
             mesh = trimesh.load(tmp_output_path_mesh, force="mesh")
-            mesh.export(output_dir / (batch["name"][0] + ".glb"), include_normals=True)
-            print(f"Saved result for {batch['name'][0]} to {output_dir / (batch['name'][0] + '.glb')}")
+            final_path = mesh_output_dir / (batch["name"][0] + ".glb")
+            mesh.export(final_path, include_normals=True)
+            print(f"SUCCESS: Result for {batch['name'][0]} saved to {final_path}")
+            print(f"="*50 + "\n")
 
 
 if __name__ == "__main__":
