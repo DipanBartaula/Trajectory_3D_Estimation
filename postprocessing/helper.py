@@ -38,68 +38,67 @@ def render_mesh_to_image(mesh, color, resolution=(512, 512)):
     Works on headless machines without a display.
     """
     import numpy as np
+    import os
 
     if mesh is None:
         return np.ones((*resolution, 3), dtype=np.uint8) * 255
 
-    import os
-
-    # Set offscreen rendering backend before importing pyrender
-    # Try EGL first (faster on GPU), fall back to OSMesa (CPU software rendering)
+    # Set offscreen rendering backend
     if "PYOPENGL_PLATFORM" not in os.environ:
         os.environ["PYOPENGL_PLATFORM"] = "egl"
 
     try:
+        # Classical PyOpenGL startswith fix for some headless environments
+        import OpenGL
+        # Fixing the 'TypeError: startswith first arg must be bytes...' issue
+        # by making extension checking return False (conservative)
+        from OpenGL import extensions
+        def _has_extension(specifier): return False
+        extensions.hasExtension = _has_extension
+        
         import pyrender
-    except Exception:
-        # If EGL fails, try OSMesa
-        os.environ["PYOPENGL_PLATFORM"] = "osmesa"
-        import pyrender
+        
+        # Create a copy and apply color
+        mesh_copy = mesh.copy()
+        mesh_copy.visual.vertex_colors = np.array(color + [255], dtype=np.uint8)
 
-    import numpy as np
+        # Convert to pyrender mesh
+        py_mesh = pyrender.Mesh.from_trimesh(mesh_copy)
 
-    # Create a copy and apply color
-    mesh_copy = mesh.copy()
-    mesh_copy.visual.vertex_colors = np.array(color + [255], dtype=np.uint8)
+        # Create scene
+        scene = pyrender.Scene(bg_color=[255, 255, 255, 255])
+        scene.add(py_mesh)
 
-    # Convert to pyrender mesh
-    py_mesh = pyrender.Mesh.from_trimesh(mesh_copy)
+        # Camera setup
+        camera = pyrender.PerspectiveCamera(yfov=np.pi / 4.0)
+        camera_pose = np.eye(4)
+        camera_pose[:3, 3] = np.array([2.0, 2.0, 1.5])
+        camera_pose[:3, :3] = _look_at_rotation(
+            eye=camera_pose[:3, 3],
+            target=np.array([0.0, 0.0, 0.0]),
+            up=np.array([0.0, 0.0, 1.0]),
+        )
+        scene.add(camera, pose=camera_pose)
 
-    # Create scene
-    scene = pyrender.Scene(bg_color=[255, 255, 255, 255])
-    scene.add(py_mesh)
+        # Lights
+        light = pyrender.DirectionalLight(color=[1.0, 1.0, 1.0], intensity=3.0)
+        scene.add(light, pose=camera_pose)
+        fill_light_pose = np.eye(4)
+        fill_light_pose[:3, 3] = np.array([-2.0, -1.0, 1.0])
+        fill_light = pyrender.DirectionalLight(color=[1.0, 1.0, 1.0], intensity=1.5)
+        scene.add(fill_light, pose=fill_light_pose)
 
-    # Camera setup: Z-up view, looking from front-right-top angle
-    # Matches the point cloud visualization viewpoint
-    camera = pyrender.PerspectiveCamera(yfov=np.pi / 4.0)  # Narrower FOV for larger appearance
-    camera_pose = np.eye(4)
-    # Position camera to view Z-up mesh from elevated front-right angle
-    # elev=25, azim=45 in matplotlib corresponds to this camera position
-    camera_pose[:3, 3] = np.array([2.0, 2.0, 1.5])
-    # Look at origin with Z as up vector
-    camera_pose[:3, :3] = _look_at_rotation(
-        eye=camera_pose[:3, 3],
-        target=np.array([0.0, 0.0, 0.0]),
-        up=np.array([0.0, 0.0, 1.0]),  # Z-up
-    )
-    scene.add(camera, pose=camera_pose)
+        # Render
+        renderer = pyrender.OffscreenRenderer(*resolution)
+        color_img, _ = renderer.render(scene)
+        renderer.delete()
+        return color_img
 
-    # Add lights from multiple directions for better visibility
-    light = pyrender.DirectionalLight(color=[1.0, 1.0, 1.0], intensity=3.0)
-    scene.add(light, pose=camera_pose)
-
-    # Add fill light from opposite side
-    fill_light_pose = np.eye(4)
-    fill_light_pose[:3, 3] = np.array([-2.0, -1.0, 1.0])
-    fill_light = pyrender.DirectionalLight(color=[1.0, 1.0, 1.0], intensity=1.5)
-    scene.add(fill_light, pose=fill_light_pose)
-
-    # Render
-    renderer = pyrender.OffscreenRenderer(*resolution)
-    color_img, _ = renderer.render(scene)
-    renderer.delete()
-
-    return color_img
+    except Exception as e:
+        print(f"  [WARNING] Mesh rendering failed: {e}")
+        print("  If you are in a headless environment, ensure OSMesa or EGL is installed.")
+        # Return a white image with some text would be better, but white is fine for now
+        return np.ones((*resolution, 3), dtype=np.uint8) * 255
 
 
 def _look_at_rotation(eye, target, up):
