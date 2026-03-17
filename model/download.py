@@ -7,20 +7,20 @@ from pathlib import Path
 from huggingface_hub import snapshot_download
 
 
-def setup_checkpoints():
-    Path("checkpoints").mkdir(exist_ok=True)
+def setup_checkpoints(checkpoint_dir="./checkpoints"):
+    Path(checkpoint_dir).mkdir(parents=True, exist_ok=True)
     try:
         snapshot_download(
             repo_id="facebook/ShapeR",
             allow_patterns=["*.ckpt", "*.yaml"],
-            local_dir="./checkpoints",
+            local_dir=checkpoint_dir,
         )
     except Exception as e:
         print(f"Error downloading generic checkpoints: {e}")
         print("Note: If you don't have access to facebook/ShapeR, please place .ckpt and .yaml files in checkpoints/ manually.")
     
     # Download SAM Checkpoint specifically
-    sam_ckpt = Path("checkpoints/sam_vit_b_01ec64.pth")
+    sam_ckpt = Path(checkpoint_dir) / "sam_vit_b_01ec64.pth"
     if not sam_ckpt.exists():
         print("Downloading SAM checkpoint...")
         import torch

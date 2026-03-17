@@ -111,6 +111,23 @@ def main():
         action="store_true",
         help="Disable text conditioning and T5/CLIP model loading.",
     )
+    parser.add_argument(
+        "--checkpoint_dir",
+        type=str,
+        default="/mnt/shared_models/_home/pshrestha",
+        help="Path where checkpoints are stored.",
+    )
+    parser.add_argument(
+        "--force_reprocess",
+        action="store_true",
+        help="Force reprocessing the video even if the output PKL already exists.",
+    )
+    parser.add_argument(
+        "--dataset_dir",
+        type=str,
+        default="data",
+        help="Path where dataset is/will be downloaded and evaluated from.",
+    )
 
     args = parser.parse_args()
 
@@ -123,14 +140,26 @@ def main():
             # Generate a default pkl name based on video name
             video_name = Path(args.video_path).stem
             args.input_pkl = f"{video_name}.pkl"
-        
-        print(f"Processing video {args.video_path} -> {args.input_pkl}")
-        
-        # Determine device
+            
+        pkl_exists = False
+        if os.path.exists(args.input_pkl):
+            pkl_exists = True
+        else:
+            possible_path = os.path.join(args.dataset_dir, args.input_pkl)
+            if os.path.exists(possible_path):
+                pkl_exists = True
+                args.input_pkl = possible_path
+
+        if pkl_exists and not args.force_reprocess:
+            print(f"PKL file {args.input_pkl} already exists. Skipping video preprocessing. Use --force_reprocess to overwrite.")
+        else:
+            print(f"Processing video {args.video_path} -> {args.input_pkl}")
+            
+            # Determine device
         device = "cuda" if torch.cuda.is_available() else "cpu"
         
         # Check for SAM checkpoint
-        sam_ckpt_dir = "checkpoints"
+        sam_ckpt_dir = args.checkpoint_dir
         if not os.path.exists(sam_ckpt_dir):
             os.makedirs(sam_ckpt_dir, exist_ok=True)
             
@@ -151,38 +180,44 @@ def main():
                     print(f"Failed to download SAM checkpoint: {e}")
                     sam_ckpt = None # Logic downstream needs to handle this or crash
             
-        process_video(args.video_path, args.input_pkl, sam_checkpoint=sam_ckpt, device=device)
+            process_video(args.video_path, args.input_pkl, sam_checkpoint=sam_ckpt, device=device)
     
     if not args.input_pkl:
         # Fallback default if nothing provided (though arguments usually handle defaults, we changed default to None)
         args.input_pkl = "ADT1292__stool.pkl"
         print(f"No input provided, using default: {args.input_pkl}")
     
+    # Check if input_pkl exists in dataset_dir if not found locally
+    if not os.path.exists(args.input_pkl) and not args.video_path:
+        possible_path = os.path.join(args.dataset_dir, args.input_pkl)
+        if os.path.exists(possible_path):
+            args.input_pkl = possible_path
+    
     print(f"Inference Config: {args.config} (Views: {preset_configs[args.config][0]}, Tokens*:{preset_configs[args.config][1]}, Steps: {preset_configs[args.config][2]})")
 
     num_images, token_multiplier, num_steps = preset_configs[args.config]
 
-    # example override of weights stored in /home/yawarnihal/shaper_weights
-    # todo: once the checkpoints are on huggingface, adjust this
-    setup_checkpoints()
+    # Download or verify checkpoints
+    setup_checkpoints(checkpoint_dir=args.checkpoint_dir)
     
-    # Only setup data if it's the default demo file or we need to download it.
-    # If we generated it from video, we don't need to download it.
-    if args.input_pkl == "ADT1292__stool.pkl" and not os.path.exists(args.input_pkl):
-        setup_data(args.input_pkl)
-
+    # Only setup data if we need to download it.
+    # If we generated it from video or it exists, we don't need to download it.
+    if not os.path.exists(args.input_pkl) and not args.video_path:
+        # Pass the relative path directly so directory structure is preserved during download
+        setup_data(args.input_pkl, download_dir=args.dataset_dir)
+        args.input_pkl = os.path.join(args.dataset_dir, args.input_pkl)
 
     output_dir = Path(args.output_dir)
     if not output_dir.exists():
         output_dir.mkdir(parents=True, exist_ok=True)
 
     # load the checkpoint
-    ckpt_file = "checkpoints/019-0-bfloat16.ckpt"
+    ckpt_file = os.path.join(args.checkpoint_dir, "019-0-bfloat16.ckpt")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     state_dict = torch.load(ckpt_file, map_location=device, weights_only=False)
 
     # load the config (usually located in the folder above checkpoint)
-    yaml_file = "checkpoints/config.yaml"
+    yaml_file = os.path.join(args.checkpoint_dir, "config.yaml")
     config = omegaconf.OmegaConf.load(yaml_file)
     # load the model and weights
     print("Loading model...")
@@ -192,7 +227,7 @@ def main():
     print("Model loaded successfully.")
 
     vae = MichelangeloLikeAutoencoderWrapper(
-        "checkpoints/vae-088-0-bfloat16.ckpt", device
+        os.path.join(args.checkpoint_dir, "vae-088-0-bfloat16.ckpt"), device
     )
     val = vae.model.to(dtype=torch.float16)
     
@@ -224,10 +259,10 @@ def main():
     # create batch sample
     print("Loading input pkl from", args.input_pkl)
     
-    # Check if the path exists directly, otherwise try data/ folder
+    # Check if the path exists directly, otherwise try args.dataset_dir folder
     pkl_path = args.input_pkl
     if not os.path.exists(pkl_path):
-        possible_path = os.path.join("data", args.input_pkl)
+        possible_path = os.path.join(args.dataset_dir, args.input_pkl)
         if os.path.exists(possible_path):
             pkl_path = possible_path
             
@@ -354,7 +389,7 @@ def main():
             mesh_output_dir.mkdir(parents=True, exist_ok=True)
             
             # Use a local temporary path that works on Windows
-            tmp_dir = os.path.join(os.getcwd(), "data", "temp")
+            tmp_dir = os.path.join(os.getcwd(), args.dataset_dir, "temp")
             os.makedirs(tmp_dir, exist_ok=True)
             tmp_output_path_mesh = os.path.join(tmp_dir, f"{batch['name'][0]}_temp.obj")
             
@@ -365,6 +400,22 @@ def main():
             final_path = mesh_output_dir / (batch["name"][0] + ".glb")
             mesh.export(final_path, include_normals=True)
             print(f"SUCCESS: Result for {batch['name'][0]} saved to {final_path}")
+            
+            # --- Blender Rendering ---
+            mesh_video_dir = Path("mesh_video")
+            mesh_video_dir.mkdir(parents=True, exist_ok=True)
+            video_output_path = mesh_video_dir / (batch["name"][0] + ".mp4")
+            
+            print(f"[DEBUG] Rendering video of the mesh using Blender...")
+            try:
+                import subprocess
+                render_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "render_blender.py")
+                cmd = ["blender", "-b", "-P", render_script, "--", str(final_path), str(video_output_path)]
+                subprocess.run(cmd, check=True)
+                print(f"SUCCESS: Video rendered to {video_output_path}")
+            except Exception as e:
+                print(f"WARNING: Failed to render video. Is Blender installed and in PATH? Error: {e}")
+                
             print(f"="*50 + "\n")
 
 

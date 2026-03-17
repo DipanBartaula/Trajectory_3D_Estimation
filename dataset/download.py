@@ -7,15 +7,15 @@ from pathlib import Path
 from huggingface_hub import hf_hub_download
 
 
-def setup_data(pickle_name):
+def setup_data(pickle_name, download_dir="./data"):
     # Download "train.csv" from the dataset repository
-    Path("data").mkdir(exist_ok=True)
+    Path(download_dir).mkdir(parents=True, exist_ok=True)
     try:
         hf_hub_download(
             repo_id="facebook/ShapeR-Evaluation",
             filename=pickle_name,
             repo_type="dataset",
-            local_dir="./data",  # Optional: forces it to a specific folder instead of cache
+            local_dir=download_dir,  # Optional: forces it to a specific folder instead of cache
         )
     except Exception as e:
         print(f"Error downloading data: {e}")

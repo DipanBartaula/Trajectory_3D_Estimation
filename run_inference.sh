@@ -1,51 +1,86 @@
 #!/bin/bash
 
-# Script to run ShapeR inference on a video file
-# Usage: ./run_inference.sh <path_to_video.mp4> [device]
+# Script to run ShapeR inference
+# Usage: ./run_inference.sh [--video file.mp4 | --pkl file.pkl | --dataset name.pkl] [--device cuda]
 
-VIDEO_PATH=$1
-DEVICE=${2:-cuda}  # Default to cuda if not specified
+DEVICE="cuda"
+VIDEO_PATH=""
+PKL_PATH=""
+DATASET_PKL=""
+DATASET_DIR="/mnt/shared_models/_home/pshrestha"
+OUTPUT_DIR="output_shaper"
 
-# Optional: Set Hugging Face Cache Directory
-# export HF_HOME="/mnt/Enterprise3/dipan/hf_cache"
+# Parse arguments
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --video) VIDEO_PATH="$2"; shift ;;
+        --pkl) PKL_PATH="$2"; shift ;;
+        --dataset) DATASET_PKL="$2"; shift ;;
+        --device) DEVICE="$2"; shift ;;
+        *) echo "Unknown parameter passed: $1"; exit 1 ;;
+    esac
+    shift
+done
 
-if [ -z "$VIDEO_PATH" ]; then
-  echo "Error: No video path provided."
-  echo "Usage: ./run_inference.sh <path_to_video.mp4> [device]"
-  echo "Example: ./run_inference.sh my_video.mp4"
-  exit 1
+if [ -z "$VIDEO_PATH" ] && [ -z "$PKL_PATH" ] && [ -z "$DATASET_PKL" ]; then
+    echo "Error: Must specify one of target inputs."
+    echo "Usage: ./run_inference.sh [--video file.mp4 | --pkl file.pkl | --dataset name.pkl] [--device cuda]"
+    exit 1
 fi
 
-OUTPUT_DIR="output_shaper"
-PROCESSED_DIR="data/processed"
-mkdir -p "$PROCESSED_DIR"
-
-VIDEO_NAME=$(basename "$VIDEO_PATH" .mp4)
-PKL_PATH="$PROCESSED_DIR/${VIDEO_NAME}.pkl"
-
 echo "================================================="
-echo "Starting ShapeR Inference Pipeline"
-echo "Video: $VIDEO_PATH"
-echo "Processed PKL will be saved to: $PKL_PATH"
 echo "Config: balance"
 echo "Output Directory: $OUTPUT_DIR"
 echo "Device: $DEVICE"
 echo "================================================="
 
-# Ensure conda environment is active (optional check)
-# if [[ "$CONDA_DEFAULT_ENV" != "shaper" ]]; then
-#     echo "Warning: Conda environment 'shaper' is not active."
-#     echo "You might want to run: conda activate shaper"
-# fi
+if [ -n "$VIDEO_PATH" ]; then
+    VIDEO_NAME=$(basename "$VIDEO_PATH" .mp4)
+    TARGET_PKL="$DATASET_DIR/$VIDEO_NAME.pkl"
+    echo "Starting ShapeR Inference Pipeline (Video Mode)"
+    echo "Video: $VIDEO_PATH"
+    echo "Processed PKL will be saved to: $TARGET_PKL"
+    echo "================================================="
+    
+    python infer_shape.py \
+        --video_path "$VIDEO_PATH" \
+        --input_pkl "$TARGET_PKL" \
+        --config balance \
+        --output_dir "$OUTPUT_DIR" \
+        --dataset_dir "$DATASET_DIR" \
+        --save_visualization \
+        --remove_floating_geometry \
+        --simplify_mesh
 
-python infer_shape.py \
-    --video_path "$VIDEO_PATH" \
-    --input_pkl "$PKL_PATH" \
-    --config balance \
-    --output_dir "$OUTPUT_DIR" \
-    --save_visualization \
-    --remove_floating_geometry \
-    --simplify_mesh
+elif [ -n "$PKL_PATH" ]; then
+    echo "Starting ShapeR Inference Pipeline (Local PKL Mode)"
+    echo "Input PKL: $PKL_PATH"
+    echo "================================================="
+    
+    python infer_shape.py \
+        --input_pkl "$PKL_PATH" \
+        --config balance \
+        --output_dir "$OUTPUT_DIR" \
+        --dataset_dir "$DATASET_DIR" \
+        --save_visualization \
+        --remove_floating_geometry \
+        --simplify_mesh
+
+elif [ -n "$DATASET_PKL" ]; then
+    echo "Starting ShapeR Inference Pipeline (Dataset Evaluation Mode)"
+    echo "Dataset PKL: $DATASET_PKL"
+    echo "Will be loaded/downloaded from: $DATASET_DIR"
+    echo "================================================="
+    
+    python infer_shape.py \
+        --input_pkl "$DATASET_PKL" \
+        --config balance \
+        --output_dir "$OUTPUT_DIR" \
+        --dataset_dir "$DATASET_DIR" \
+        --save_visualization \
+        --remove_floating_geometry \
+        --simplify_mesh
+fi
 
 if [ $? -eq 0 ]; then
     echo "================================================="
