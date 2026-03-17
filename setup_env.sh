@@ -65,19 +65,19 @@ export MAX_JOBS=4
 
 echo "-> Environment Variables (CUDA & Conda) Exported Successfully."
 
-# 4. Install Conda C++ Libraries
-echo "-> Installing system library compilers and sparsehash via Conda..."
-conda install -y -c conda-forge gcc_linux-64=11 gxx_linux-64=11 sparsehash
+# 4. Install Conda C++ Libraries (Commented out as requested)
+# echo "-> Installing system library compilers and sparsehash via Conda..."
+# conda install -y -c conda-forge gcc_linux-64=11 gxx_linux-64=11 sparsehash
 
-# 5. Install Standard Python Packages
-echo "-> Installing standard Python dependencies via pip..."
-pip install wheel setuptools ninja
-pip install numpy tqdm hydra-core matplotlib opencv-python imageio easydict munch plyfile
-pip install torch==2.7.1 torchvision==0.22.1 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cu128
-pip install transformers trimesh scikit-image diffusers gradio peft einops
-pip install flash-attn --no-build-isolation --no-cache-dir
-pip install "imageio[ffmpeg]" "imageio[pyav]"
-pip install pymeshlab sophuspy fast_simplification scikit-learn timm plotly torchdiffeq sentencepiece protobuf pyrender jupyter
+# 5. Install Standard Python Packages (Commented out as requested)
+# echo "-> Installing standard Python dependencies via pip..."
+# pip install wheel setuptools ninja
+# pip install numpy tqdm hydra-core matplotlib opencv-python imageio easydict munch plyfile
+# pip install torch==2.7.1 torchvision==0.22.1 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cu128
+# pip install transformers trimesh scikit-image diffusers gradio peft einops
+# pip install flash-attn --no-build-isolation --no-cache-dir
+# pip install "imageio[ffmpeg]" "imageio[pyav]"
+# pip install pymeshlab sophuspy fast_simplification scikit-learn timm plotly torchdiffeq sentencepiece protobuf pyrender jupyter
 
 # 6. Install Complex Compiling Packages (Torch-Cluster & Torchsparse)
 echo "-> Installing Torch-Cluster and Legacy Torchsparse (This may take several minutes)..."
