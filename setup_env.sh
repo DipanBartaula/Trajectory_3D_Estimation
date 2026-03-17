@@ -6,9 +6,9 @@ echo "ShapeR Environment Setup Script"
 echo "======================================"
 
 # 1. Environment Safety Check
-if [[ "$CONDA_DEFAULT_ENV" != "shaper" ]]; then
-    echo "Warning: Conda environment 'shaper' is not currently active!"
-    echo "Please run 'conda activate shaper' before running this script."
+if [[ "$CONDA_DEFAULT_ENV" != "shape" ]]; then
+    echo "Warning: Conda environment 'shape' is not currently active!"
+    echo "Please run 'conda activate shape' before running this script."
     echo "Press Ctrl+C to abort, or Enter to continue anyway..."
     read -r
 fi
