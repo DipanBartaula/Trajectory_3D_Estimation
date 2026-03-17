@@ -9,8 +9,8 @@
 ## Step 1: Create Conda Environment
 
 ```bash
-conda create -n shaper python=3.10
-conda activate shaper
+conda create -n shape python=3.10
+conda activate shape
 ```
 
 ## Step 2: Set Up CUDA Environment

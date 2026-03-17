@@ -43,7 +43,7 @@ fi
 
 echo "-> Acquired CUDA_HOME: $CUDA_HOME"
 
-# 3. Export all required CUDA Environment Variables securely
+# 3. Export all required CUDA and Conda Environment Variables
 export CUDA_INCLUDE=$CUDA_HOME/include
 
 # Handle systems using lib64 vs lib natively
@@ -53,13 +53,17 @@ else
     export CUDA_LIB=$CUDA_HOME/lib
 fi
 
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$CUDA_LIB
-export LIBRARY_PATH=$LIBRARY_PATH:$CUDA_LIB
-export CFLAGS="-I$CUDA_HOME/include"
-export CXXFLAGS="-I$CUDA_HOME/include"
-export CPATH="$CUDA_HOME/include:$CPATH"
+# CRITICAL: Add Conda include/lib paths so compilers find sparsehash and other conda-installed headers/libs
+export CPATH="$CONDA_PREFIX/include:$CUDA_HOME/include:$CPATH"
+export CFLAGS="-I$CONDA_PREFIX/include -I$CUDA_HOME/include $CFLAGS"
+export CXXFLAGS="-I$CONDA_PREFIX/include -I$CUDA_HOME/include $CXXFLAGS"
+export LIBRARY_PATH="$CONDA_PREFIX/lib:$CUDA_LIB:$LIBRARY_PATH"
+export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$CUDA_LIB:$LD_LIBRARY_PATH"
 
-echo "-> CUDA Environment Variables Exported Successfully."
+# Prevent Ninja from spawning too many processes (fixes OOM during torchsparse build)
+export MAX_JOBS=4 
+
+echo "-> Environment Variables (CUDA & Conda) Exported Successfully."
 
 # 4. Install Conda C++ Libraries
 echo "-> Installing system library compilers and sparsehash via Conda..."
@@ -78,6 +82,9 @@ pip install pymeshlab sophuspy fast_simplification scikit-learn timm plotly torc
 # 6. Install Complex Compiling Packages (Torch-Cluster & Torchsparse)
 echo "-> Installing Torch-Cluster and Legacy Torchsparse (This may take several minutes)..."
 pip install torch-cluster -f https://data.pyg.org/whl/torch-2.7.1+cu128.html
+
+# Fix for torchsparse: explicitly include the google/sparsehash paths if needed
+# But CPATH should already handle this.
 pip install --verbose git+https://github.com/nihalsid/torchsparse@legacy --no-build-isolation
 
 # 7. Final Verification
